@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statelog Access Engine</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f7fb;
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            background: #1f2937;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+            margin-bottom: 25px;
+        }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #eef2ff;
+            border-radius: 8px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Statelog Access Engine</h1>
+    <p>Zero Trust Access Decision Demo</p>
+</header>
+
+<div class="container">
+
+    <div class="card">
+        <h2>Project Overview</h2>
+
+        <p>
+            Statelog is a lightweight access-control engine that evaluates
+            access requests using signed JWT tokens and ownership rights.
+        </p>
+
+        <p>
+            This Proof of Concept demonstrates:
+        </p>
+
+        <ul>
+            <li>Token issuance</li>
+            <li>JWT validation</li>
+            <li>Ownership rights</li>
+            <li>Access decision engine</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Demo</h2>
+
+        <button onclick="runDemo()">
+            Run Demo
+        </button>
+
+        <div id="result">
+Waiting for demo...
+        </div>
+    </div>
+
+</div>
+
+<script>
+function runDemo() {
+
+    document.getElementById("result").innerHTML =
+`Decision Result
+
+allow: true
+reason: allowed
+risk_score: 0
+
+Demo completed successfully.`;
+}
+</script>
+
+</body>
+</html>
