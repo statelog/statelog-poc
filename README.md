@@ -174,5 +174,8 @@ Statelog aims to become a universal authorization layer for systems requiring se
 The long-term vision is a platform where digital rights, ownership, state and risk signals can be evaluated in real time before any action is executed.
 
 ---
+## Demo result
+
+Demo completed successfully: JWT token issued, access right validated, decision returned allow=true.
 
 © Statelog. All Rights Reserved.
