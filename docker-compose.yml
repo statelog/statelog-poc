@@ -9,7 +9,7 @@ services:
       JWT_SECRET: change-me-in-production
       ADMIN_API_KEY: admin-dev-key
     ports:
-      - "8000:8000"
+      - "8001:8000"
     depends_on:
       - postgres
       - redis
@@ -35,9 +35,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "5433:5432"
 
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - "6380:6379"
