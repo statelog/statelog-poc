@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="et">
+<head>
+  <meta charset="utf-8">
+  <title>Tenant Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { background: #f2f2f2; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Tenant {{ tenant.id }}</h1>
+  <p>Plan: {{ tenant.plan }} | Usage: {{ tenant.usage_count }} / {{ tenant.monthly_quota }}</p>
+
+  <h2>Access rights</h2>
+  <table>
+    <tr><th>Right</th><th>Owner</th><th>Valid</th><th>Owner changes</th></tr>
+    {% for r in rights %}
+    <tr><td>{{ r.right_id }}</td><td>{{ r.owner_id }}</td><td>{{ r.valid }}</td><td>{{ r.owner_change_count }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Recent decisions</h2>
+  <table>
+    <tr><th>Time</th><th>Device</th><th>Type</th><th>Allowed</th><th>Risk</th><th>Reason</th></tr>
+    {% for l in logs %}
+    <tr><td>{{ l.created_at }}</td><td>{{ l.device_id }}</td><td>{{ l.request_type }}</td><td>{{ l.allowed }}</td><td>{{ l.risk_score }}</td><td>{{ l.reason }}</td></tr>
+    {% endfor %}
+  </table>
+</body>
+</html>

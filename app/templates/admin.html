@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="et">
+<head>
+  <meta charset="utf-8">
+  <title>Admin Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { background: #f2f2f2; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Admin dashboard</h1>
+  <h2>Tenants</h2>
+  <table>
+    <tr><th>Tenant</th><th>Name</th><th>Plan</th><th>Usage</th><th>Quota</th></tr>
+    {% for t in tenants %}
+    <tr><td><a href="/tenant/{{ t.id }}">{{ t.id }}</a></td><td>{{ t.name }}</td><td>{{ t.plan }}</td><td>{{ t.usage_count }}</td><td>{{ t.monthly_quota }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Outbox events</h2>
+  <table>
+    <tr><th>ID</th><th>Tenant</th><th>Type</th><th>Delivered</th></tr>
+    {% for e in events %}
+    <tr><td>{{ e.id }}</td><td>{{ e.tenant_id }}</td><td>{{ e.event_type }}</td><td>{{ e.delivered }}</td></tr>
+    {% endfor %}
+  </table>
+</body>
+</html>
