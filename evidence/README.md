@@ -1,64 +1,47 @@
-# Evidence Package
+# Statelog Access Engine
 
-## Project
+### Real-Time Digital Rights Infrastructure
 
-Statelog Access Engine
+Statelog is a Zero Trust ownership and access decision platform.
 
-Zero Trust Access Decision Engine Proof of Concept.
+Instead of trusting credentials alone, Statelog evaluates ownership, rights, device context and risk signals in real time before granting access.
 
-## Demonstrated Features
+The platform enables secure, auditable and context-aware authorization for physical assets, digital services, industrial systems and shared infrastructure.
 
-- JWT token issuance
-- JWT token validation
-- Ownership rights validation
-- Access decision engine
-- Frontend integration
-- Docker deployment
-- Swagger API documentation
+## Working Proof of Concept
 
-## Evidence Structure
+Successfully demonstrated:
 
-### screenshots
+✓ JWT token issuance
 
-Contains screenshots demonstrating:
+✓ JWT token validation
 
-- Rights creation
-- JWT issuance
-- Successful access decision
-- Swagger documentation
-- Request access endpoint
+✓ Ownership rights validation
 
-### api-tests
+✓ Real-time access decisions
 
-Contains:
+✓ Multi-tenant architecture
 
-- Example API requests
-- Example API responses
-- Test notes
+✓ Docker deployment
 
-### logs
+✓ Browser-based demonstration interface
 
-Contains:
+## Why Statelog?
 
-- Backend runtime logs
-- Successful API execution records
+Most access systems answer only one question:
 
-## Result
+**Who are you?**
 
-Demo completed successfully.
+Statelog answers a more important question:
 
-Final access decision:
+**Should this action be allowed right now?**
 
-allow = true
+This enables real-time authorization based on ownership, permissions, risk conditions and business rules rather than relying solely on identity verification.
 
-reason = allowed
+## Vision
 
-risk_score = 0
+We believe every access decision should be verified at the moment it occurs.
 
-## Status
+Our long-term vision is to become the universal decision layer between ownership and access.
 
-Project completion estimate:
-
-90–95%
-
-Core functionality is fully operational.
+Whether the asset is a smart lock, industrial machine, vehicle, ticket, digital credential or online service, Statelog determines whether access should be granted based on real-time state and policy evaluation.
