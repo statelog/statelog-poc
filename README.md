@@ -1,28 +1,53 @@
 # Statelog
 
-## Real-Time Digital Rights Infrastructure
+## Stateful Authorization Engine
 
-Statelog is a platform for creating, validating and managing digital rights as stateful server-side objects.
+Real-time authorization infrastructure for digital rights, ownership validation and context-aware access decisions.
 
-Unlike traditional access control systems that validate identity only at login, Statelog evaluates every access request in real time and determines whether an action should be allowed or denied based on the current state of a digital right.
+### Investor Summary
+
+Statelog introduces a new authorization model where access decisions are evaluated continuously against the current state of a digital right.
+
+Instead of trusting a login event that may have happened hours, days or weeks earlier, Statelog evaluates ownership, validity, device identity and risk signals at the exact moment an action is requested.
+
+The result is a system capable of making dynamic, auditable and context-aware authorization decisions in real time.
+
+Potential applications include:
+
+* Digital Identity
+* Government Services
+* SaaS Platforms
+* Financial Services
+* Ticketing Systems
+* Industrial IoT
+* Critical Infrastructure
 
 ---
 
 ## The Problem
 
-Most systems answer a single question:
+Most authorization systems make a decision only once:
+
+**at login time.**
+
+After authentication succeeds, access is often granted for hours, days or even months without reevaluating whether access should still be valid.
+
+This creates several problems:
+
+* ownership changes over time
+* devices are lost or replaced
+* permissions become outdated
+* compromised credentials remain usable
+* risk conditions change after login
+* access decisions are difficult to audit
+
+Modern systems require continuous authorization rather than one-time authorization.
+
+The important question is no longer:
 
 **Who are you?**
 
-Authentication alone is often insufficient when:
-
-* ownership changes over time
-* devices are replaced
-* permissions must be revoked immediately
-* access decisions require context
-* actions must be auditable
-
-Modern systems need to answer a different question:
+The important question becomes:
 
 **Should this action be allowed right now?**
 
@@ -31,6 +56,10 @@ Modern systems need to answer a different question:
 ## The Statelog Approach
 
 Statelog treats a digital right as a stateful object managed by a centralized decision engine.
+
+Every digital right can evolve over time.
+
+Authorization decisions are based on the current state of the right rather than a historical login event.
 
 Each digital right may contain:
 
@@ -41,77 +70,149 @@ Each digital right may contain:
 * risk indicators
 * decision metadata
 
-Every request is evaluated against the current state of the right before access is granted.
+Every access request is evaluated against the latest state before permission is granted.
 
 ---
 
-## Decision Flow
+## Authorization Flow
 
 ```text
 User / Device
-      ↓
+      │
+      ▼
 Access Request
-      ↓
+      │
+      ▼
 Token Validation
-      ↓
+      │
+      ▼
 Digital Right Lookup
-      ↓
+      │
+      ▼
 Risk Signal Analysis
-      ↓
+      │
+      ▼
 Decision Engine
-      ↓
+      │
+      ▼
 ALLOW / DENY
-      ↓
+      │
+      ▼
 State Update
-      ↓
+      │
+      ▼
 Audit Log
 ```
 
 ---
 
-## Demonstrated Capabilities
+## Core Capabilities
 
-* JWT token issuance
-* JWT token validation
-* Multi-tenant architecture
-* Device registration
-* Ownership tracking
-* Digital rights management
-* Replay attack protection
-* Access decision engine
-* Audit-ready logging
-* Browser-based demonstration interface
+### Digital Rights Management
+
+Create, update and revoke digital rights in real time.
+
+### Stateful Authorization
+
+Access decisions depend on the current state of a right rather than a historical authentication event.
+
+### Ownership Tracking
+
+Track ownership changes and validate ownership before every access decision.
+
+### JWT-Based Security
+
+Issue and validate signed authorization tokens.
+
+### Risk-Aware Decisions
+
+Incorporate risk signals into authorization outcomes.
+
+### Auditability
+
+Maintain decision history for compliance and forensic analysis.
+
+### Multi-Tenant Architecture
+
+Support multiple organizations through isolated tenant environments.
 
 ---
 
-## Example Decision
+## Demonstrated Proof of Concept
 
-```text
-allow: true
-reason: allowed
-risk_score: 0
-decision_version: v8.2
+The current Proof of Concept successfully demonstrates:
+
+* Tenant creation
+* Client registration
+* Device registration
+* Digital right creation
+* JWT issuance
+* JWT validation
+* Access request processing
+* Real-time authorization decisions
+* Audit-ready decision logging
+
+---
+
+## Example Authorization Result
+
+```json
+{
+  "allow": true,
+  "reason": "allowed",
+  "risk_score": 0,
+  "decision_version": "v8.2"
+}
 ```
 
 ---
 
 ## Technology Stack
 
-Backend
+### Backend
 
 * Python
 * FastAPI
+
+### Data Layer
+
 * PostgreSQL
 * Redis
 
-Infrastructure
+### Infrastructure
 
 * Docker
 * Docker Compose
 
-Documentation
+### Documentation
 
-* OpenAPI / Swagger
+* OpenAPI
+* Swagger UI
+
+---
+
+## Evidence Package
+
+The repository includes a complete demonstration package:
+
+### API Evidence
+
+* Token issuance
+* Digital right creation
+* Access decision results
+
+### Screenshots
+
+* Swagger API documentation
+* JWT issuance flow
+* Digital right creation
+* Successful authorization decision
+
+### Logs
+
+* Backend execution logs
+* Decision engine activity
+* Authorization traces
 
 ---
 
@@ -129,7 +230,7 @@ Frontend Demo:
 http://localhost:8080
 ```
 
-API Documentation:
+Swagger Documentation:
 
 ```text
 http://localhost:8001/docs
@@ -137,45 +238,78 @@ http://localhost:8001/docs
 
 ---
 
-## Current Status
+## Strategic Positioning
 
-Working Proof of Concept.
+Traditional systems focus on:
 
-Successfully demonstrated:
+* Authentication
+* Roles
+* Static permissions
 
-* tenant creation
-* client creation
-* device registration
-* digital right creation
-* JWT issuance
-* JWT validation
-* access request processing
-* real-time access decisions
+Statelog focuses on:
+
+* Dynamic authorization
+* Digital rights
+* Ownership validation
+* Context awareness
+* Risk evaluation
+* Real-time decision making
 
 ---
 
-## Potential Applications
+## Potential Market Opportunities
 
-* Digital identity systems
-* Access control platforms
-* Electronic ticketing
-* Government services
-* Industrial systems
-* SaaS platforms
-* Financial workflows
-* Critical infrastructure
+### Government
+
+Digital identity and citizen services.
+
+### Enterprise SaaS
+
+Fine-grained authorization and entitlement management.
+
+### Financial Services
+
+Transaction authorization and fraud prevention.
+
+### Mobility & Ticketing
+
+Dynamic ownership and entitlement verification.
+
+### Industrial Systems
+
+Machine-to-machine authorization and operational control.
+
+### Critical Infrastructure
+
+Continuous authorization for high-value systems.
 
 ---
 
 ## Vision
 
-Statelog aims to become a universal authorization layer for systems requiring secure, auditable and context-aware access decisions.
+Statelog aims to become a universal authorization layer for modern digital systems.
 
-The long-term vision is a platform where digital rights, ownership, state and risk signals can be evaluated in real time before any action is executed.
+The long-term vision is a platform where ownership, state, risk signals and authorization policies are evaluated continuously before any action is executed.
+
+Authentication proves identity.
+
+Statelog determines whether an action should be allowed right now.
 
 ---
-## Demo result
 
-Demo completed successfully: JWT token issued, access right validated, decision returned allow=true.
+## Current Status
 
-© Statelog. All Rights Reserved.
+Working Proof of Concept.
+
+Successfully demonstrated end-to-end authorization flow with real-time decision making.
+
+Seeking:
+
+* Design partners
+* Pilot customers
+* Strategic investors
+* Identity and security collaborators
+
+---
+
+© Statelog
