@@ -10,7 +10,7 @@ Please do not disclose security vulnerabilities publicly until they have been re
 
 For security-related reports, contact:
 
-info@statelog.io
+info@statelog.ee
 
 ## Supported Versions
 
