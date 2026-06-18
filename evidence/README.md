@@ -1,7 +1,5 @@
 # Statelog
 
-Stateful Authorization Infrastructure
-
 ### Real-Time Digital Rights Infrastructure
 
 Statelog is a stateful authorization platform that evaluates digital rights, ownership and risk in real time before granting access.
