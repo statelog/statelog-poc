@@ -1,14 +1,31 @@
-# Statelog Access Engine
+# Statelog
+
+Stateful Authorization Infrastructure
 
 ### Real-Time Digital Rights Infrastructure
 
-Statelog is a Zero Trust ownership and access decision platform.
+Statelog is a stateful authorization platform that evaluates digital rights, ownership and risk in real time before granting access.
 
 Instead of trusting credentials alone, Statelog evaluates ownership, rights, device context and risk signals in real time before granting access.
 
 The platform enables secure, auditable and context-aware authorization for physical assets, digital services, industrial systems and shared infrastructure.
 
-## Working Proof of Concept
+<img width="1536" height="1024" alt="ChatGPT Image 18  juuni 2026, 16_53_56" src="https://github.com/user-attachments/assets/32cb5c29-5055-441e-8115-869dc553f384" />
+
+## Potential Applications
+
+Statelog can be used wherever access depends on ownership, rights or real-time context.
+
+- Smart Locks
+- Digital Identity
+- EV Charging Infrastructure
+- Electronic Ticketing
+- Government Services
+- Industrial IoT
+- Financial Services
+- SaaS Platforms
+  
+## Verified Capabilities
 
 Successfully demonstrated:
 
@@ -25,6 +42,8 @@ Successfully demonstrated:
 ✓ Docker deployment
 
 ✓ Browser-based demonstration interface
+
+✓ Immutable audit trail
 
 ## Why Statelog?
 
@@ -44,4 +63,18 @@ We believe every access decision should be verified at the moment it occurs.
 
 Our long-term vision is to become the universal decision layer between ownership and access.
 
-Whether the asset is a smart lock, industrial machine, vehicle, ticket, digital credential or online service, Statelog determines whether access should be granted based on real-time state and policy evaluation.
+Statelog aims to become the universal infrastructure for real-time digital rights and authorization decisions.
+
+## Current Status
+
+- Public Proof of Concept
+- Active Development
+- Seeking pilot projects and early design partners
+  
+## Contact
+
+Statelog is actively looking for pilot projects, design partners and technical collaboration.
+
+📧 info@statelog.ee
+
+🌐 https://statelog.ee
