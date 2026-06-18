@@ -63,6 +63,10 @@ Our long-term vision is to become the universal decision layer between ownership
 
 Statelog aims to become the universal infrastructure for real-time digital rights and authorization decisions.
 
+## Platform Overview
+A concise overview of the Statelog platform architecture, vision and proof of concept.
+[📄 Open the Statelog Platform Overview](docs/presentations/Statelog_Overview.pdf)
+
 ## Current Status
 
 - Public Proof of Concept
