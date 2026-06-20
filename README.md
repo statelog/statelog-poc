@@ -72,7 +72,16 @@ A concise overview of the Statelog platform architecture, vision and proof of co
 - Public Proof of Concept
 - Active Development
 - Seeking pilot projects and early design partners
-  
+
+## Project Documentation
+
+- Platform Overview
+- Technical Documentation
+- Changelog
+- Roadmap
+- Security Policy
+- Contributing Guide  
+
 ## Contact
 
 Statelog is actively looking for pilot projects, design partners and technical collaboration.
