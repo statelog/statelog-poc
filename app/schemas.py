@@ -29,6 +29,10 @@ class AccessRightCreate(BaseModel):
     valid: bool = True
 
 
+class AccessRightRevoke(BaseModel):
+    tenant_id: str
+    right_id: str
+
 class TokenIssueRequest(BaseModel):
     tenant_id: str
     right_id: str

@@ -36,6 +36,7 @@ from .risk_engine import RiskEngine
 from .schemas import (
     AccessRequest,
     AccessRightCreate,
+    AccessRightRevoke, 
     ClientCreate,
     DecisionResponse,
     DeviceCreate,
@@ -231,6 +232,54 @@ def create_right(payload: AccessRightCreate, db: Session = Depends(get_db), clie
     commit_or_409(db, detail="right_exists")
     return {"right_id": payload.right_id, "owner_id": payload.owner_id, "valid": payload.valid}
 
+
+@app.post("/rights/revoke")
+def revoke_right(
+    payload: AccessRightRevoke,
+    db: Session = Depends(get_db),
+    client: ClientCredential = Depends(get_client),
+):
+    if client.tenant_id != payload.tenant_id:
+        raise HTTPException(status_code=403, detail="tenant_mismatch")
+
+    right = db.scalar(
+        select(AccessRight).where(
+            AccessRight.tenant_id == payload.tenant_id,
+            AccessRight.right_id == payload.right_id,
+        )
+    )
+
+    if not right:
+        raise HTTPException(status_code=404, detail="right_not_found")
+
+    if not right.valid:
+        return {
+            "right_id": right.right_id,
+            "valid": False,
+            "version": right.version,
+        }
+
+    right.valid = False
+    right.version += 1
+
+    emit_event(
+        db,
+        payload.tenant_id,
+        "right.revoked",
+        {
+            "right_id": right.right_id,
+            "owner_id": right.owner_id,
+            "version": right.version,
+        },
+    )
+
+    commit_or_409(db, detail="right_revoke_failed")
+
+    return {
+        "right_id": right.right_id,
+        "valid": right.valid,
+        "version": right.version,
+    }
 
 @app.post("/token/issue")
 def token_issue(payload: TokenIssueRequest, db: Session = Depends(get_db), client: ClientCredential = Depends(get_client)):
