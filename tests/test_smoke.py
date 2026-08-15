@@ -390,4 +390,53 @@ def test_webhook_delivery_commit_failure_bubbles_for_supervisor_visibility(clien
         with pytest.raises(SQLAlchemyError):
             deliver_pending_events(db)
         db.commit = original_commit
+def test_expired_token_returns_401(client):
+    ensure_setup(client)
 
+    token = issue_token(client).json()["token"]
+
+    import jwt
+    from datetime import datetime, timedelta, timezone
+    from app.security import get_active_signing_key
+
+    payload = jwt.decode(
+        token,
+        options={
+            "verify_signature": False,
+            "verify_exp": False,
+        },
+        algorithms=[settings.jwt_algorithm],
+    )
+
+    payload["iat"] = int(
+        (datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp()
+    )
+    payload["exp"] = int(
+        (datetime.now(timezone.utc) - timedelta(minutes=5)).timestamp()
+    )
+
+    kid, signing_key = get_active_signing_key()
+
+    expired_token = jwt.encode(
+        payload,
+        signing_key,
+        algorithm=settings.jwt_algorithm,
+        headers={"kid": kid},
+    )
+
+    response = access_request(client, expired_token)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "token_expired"
+
+
+def test_invalid_token_returns_401(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    invalid_token = token + "X"
+
+    response = access_request(client, invalid_token)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_token"

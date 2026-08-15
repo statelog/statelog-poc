@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import uuid
+import jwt
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -275,7 +276,14 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
     if not device:
         raise HTTPException(status_code=404, detail="device_not_found")
 
-    claims = decode_access_token(payload.token)
+    try:
+       claims = decode_access_token(payload.token)
+    except jwt.ExpiredSignatureError as exc:
+        AUTH_FAILURE_COUNTER.labels(reason="token_expired").inc()
+        raise HTTPException(status_code=401, detail="token_expired") from exc
+    except jwt.InvalidTokenError as exc:
+        AUTH_FAILURE_COUNTER.labels(reason="invalid_token").inc()
+        raise HTTPException(status_code=401, detail="invalid_token") from exc
 
     if claims["tenant_id"] != client.tenant_id:
         raise HTTPException(status_code=403, detail="tenant_mismatch")
