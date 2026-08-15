@@ -134,6 +134,62 @@ def test_ownership_transfer_requires_rules(client):
     assert missing.status_code == 200 and missing.json()["allow"] is False
 
 
+def test_ownership_transfer_changes_owner_and_invalidates_old_owner(client):
+    ensure_setup(client)
+
+    # Issue two tokens for the original owner.
+    # One performs the transfer; the other must become invalid afterwards.
+    transfer_token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    old_owner_token = issue_token(
+        client,
+        scope="access",
+        user_id="user-123",
+    ).json()["token"]
+
+    # Transfer ownership to a new owner.
+    transfer_response = client.post(
+        "/request/access",
+        headers=HEADERS,
+        json={
+            "token": transfer_token,
+            "request_type": "ownership_transfer",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.10",
+            "country_code": "EE",
+            "new_owner_id": "user-456",
+        },
+    )
+
+    assert transfer_response.status_code == 200
+    assert transfer_response.json()["allow"] is True
+
+    # Token belonging to the previous owner must no longer work.
+    old_owner_response = access_request(client, old_owner_token)
+
+    assert old_owner_response.status_code == 403
+    assert old_owner_response.json()["detail"] == "owner_mismatch"
+
+    # The new owner must be able to obtain and use a new token.
+    new_token_response = issue_token(
+        client,
+        scope="access",
+        user_id="user-456",
+    )
+
+    assert new_token_response.status_code == 200
+
+    new_owner_token = new_token_response.json()["token"]
+    new_owner_response = access_request(client, new_owner_token)
+
+    assert new_owner_response.status_code == 200
+    assert new_owner_response.json()["allow"] is True
+
+
 def test_ip_limit_is_tenant_isolated(client):
     ensure_setup(client)
     old_limit = settings.rate_limit_per_minute
