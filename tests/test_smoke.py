@@ -249,7 +249,7 @@ def test_quota_exceeded_returns_429(client):
 
 def test_jwt_key_rotation_decode_legacy_token(monkeypatch, client):
     ensure_setup(client)
-    monkeypatch.setenv('JWT_KEYRING_JSON', '{"legacy":"legacy-secret","v2":"current-secret"}')
+    monkeypatch.setenv("JWT_KEYRING_JSON", '{"legacy":"legacy-secret-key-for-statelog-tests-2026","v2":"current-secret-key-for-statelog-tests-2026"}')
     monkeypatch.setenv('JWT_ACTIVE_KID', 'legacy')
     import importlib
     import app.config as config_module

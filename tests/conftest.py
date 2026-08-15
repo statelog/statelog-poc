@@ -1,7 +1,7 @@
 import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
-os.environ["JWT_SECRET"] = "test-secret"
+os.environ["JWT_SECRET"] = "test-secret-key-for-statelog-poc-tests-2026"
 os.environ["ADMIN_API_KEY"] = "test-admin-key"
 os.environ["REDIS_URL"] = "redis://localhost:6399/0"
 os.environ["ENVIRONMENT"] = "test"
