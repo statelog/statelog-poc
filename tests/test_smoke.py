@@ -190,6 +190,39 @@ def test_ownership_transfer_changes_owner_and_invalidates_old_owner(client):
     assert new_owner_response.json()["allow"] is True
 
 
+def test_revoke_right_invalidates_access(client):
+    ensure_setup(client)
+
+    # Two tokens are issued while the right is still valid.
+    # The first proves access works before revocation.
+    # The second remains unused until after revocation.
+    before_token = issue_token(client).json()["token"]
+    after_token = issue_token(client).json()["token"]
+
+    before_revoke = access_request(client, before_token)
+    assert before_revoke.status_code == 200
+    assert before_revoke.json()["allow"] is True
+
+    revoke_response = client.post(
+        "/rights/revoke",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "right_id": "right-001",
+        },
+    )
+
+    assert revoke_response.status_code == 200
+    assert revoke_response.json()["right_id"] == "right-001"
+    assert revoke_response.json()["valid"] is False
+    assert revoke_response.json()["version"] == 2
+
+    after_revoke = access_request(client, after_token)
+
+    assert after_revoke.status_code == 404
+    assert after_revoke.json()["detail"] == "access_right_invalid"
+
+
 def test_ip_limit_is_tenant_isolated(client):
     ensure_setup(client)
     old_limit = settings.rate_limit_per_minute
