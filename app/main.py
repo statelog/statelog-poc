@@ -88,6 +88,30 @@ app.add_middleware(
     allowed_hosts=trusted_hosts,
 )
 
+MAX_REQUEST_BODY_BYTES = 1024 * 1024  # 1 MiB
+
+
+@app.middleware("http")
+async def limit_request_body_size(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+
+    if content_length:
+        try:
+            body_size = int(content_length)
+        except ValueError:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": "invalid_content_length"},
+            )
+
+        if body_size > MAX_REQUEST_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "request_too_large"},
+            )
+
+    return await call_next(request)
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
