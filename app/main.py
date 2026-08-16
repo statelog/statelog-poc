@@ -75,6 +75,16 @@ app = FastAPI(
     openapi_url=None if settings.environment.lower() == "prod" else "/openapi.json",
 )
 
+trusted_hosts = [
+    host.strip()
+    for host in settings.trusted_hosts.split(",")
+    if host.strip()
+]
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=trusted_hosts,
+)
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):

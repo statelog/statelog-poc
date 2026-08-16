@@ -5,6 +5,7 @@ os.environ["JWT_SECRET"] = "test-secret-key-for-statelog-poc-tests-2026"
 os.environ["ADMIN_API_KEY"] = "test-admin-key"
 os.environ["REDIS_URL"] = "redis://localhost:6399/0"
 os.environ["ENVIRONMENT"] = "test"
+os.environ["TRUSTED_HOSTS"] = "testserver,localhost,127.0.0.1"
 
 from fastapi.testclient import TestClient
 import pytest

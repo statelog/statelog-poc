@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     request_decision_version: str = "v8.2"
     ip_hash_pepper: str = Field(default="ip-pepper", alias="IP_HASH_PEPPER")
     metrics_api_key: str = Field(default="", alias="METRICS_API_KEY")
+    trusted_hosts: str = Field(default="localhost,127.0.0.1", alias="TRUSTED_HOSTS")
+    forwarded_allow_ips: str = Field(default="127.0.0.1", alias="FORWARDED_ALLOW_IPS")
 
     @model_validator(mode="after")
     def validate_production_secrets(self):
