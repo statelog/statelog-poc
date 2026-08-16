@@ -16,6 +16,8 @@ from redis.exceptions import RedisError
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+from .risk_engine import RiskEngine
+from .policy_engine import PolicyEngine
 
 from .config import settings
 from .database import get_db
@@ -35,6 +37,7 @@ from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestL
 from .rate_limit import HybridRateLimiter
 from .replay_protection import HybridReplayStore
 from .risk_engine import RiskEngine
+from .policy_engine import PolicyEngine
 from .schemas import (
     AccessRequest,
     AccessRightCreate,
@@ -58,6 +61,7 @@ logger = logging.getLogger(__name__)
 
 templates = Jinja2Templates(directory="app/templates")
 risk_engine = RiskEngine()
+policy_engine = PolicyEngine()
 decision_cache: dict[str, tuple[float, dict]] = {}
 
 try:
