@@ -35,6 +35,37 @@ The project also includes supporting validation and benchmarking tools:
 * End-to-end access flow performance testing
 * Soak testing framework for sustained load validation
 
+### Performance Benchmark Results
+
+Local Docker benchmark executed with the application, PostgreSQL, Redis and outbox worker running as separate services.
+
+Health endpoint benchmark:
+
+* Requests: 500
+* Concurrency: 20
+* Successful requests: 500/500
+* Average latency: 95.71 ms
+* p50: 91.91 ms
+* p95: 149.85 ms
+* p99: 175.65 ms
+* Maximum: 193.59 ms
+
+End-to-end authorization flow benchmark:
+
+* Requests: 500
+* Concurrency: 20
+* Successful flows: 500/500
+* Failures: 0
+* Token issuance p95: 236.93 ms
+* Token issuance p99: 487.74 ms
+* Access decision p95: 586.28 ms
+* Access decision p99: 2521.93 ms
+* End-to-end p95: 685.77 ms
+* End-to-end p99: 1916.65 ms
+* Maximum end-to-end latency: 3963.24 ms
+
+The benchmark confirms successful concurrent authorization processing without request failures. Tail latency, particularly for access decisions, remains an optimization target for production readiness.
+
 ---
 
 # Validation Objectives
