@@ -1,4 +1,4 @@
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from starlette.responses import Response
 
 REQUEST_COUNTER = Counter(
@@ -29,6 +29,14 @@ CACHE_COUNTER = Counter(
     "access_decision_cache_total",
     "Decision cache hits and misses",
     ["result"],
+)
+OUTBOX_PENDING_GAUGE = Gauge(
+    "outbox_pending_events",
+    "Outbox events waiting for delivery",
+)
+OUTBOX_DEAD_LETTER_GAUGE = Gauge(
+    "outbox_dead_letter_events",
+    "Outbox events moved to the dead-letter state",
 )
 
 

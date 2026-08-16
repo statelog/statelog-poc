@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from redis import Redis
 from redis.exceptions import RedisError
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,8 @@ from .metrics import (
     AUTH_FAILURE_COUNTER,
     CACHE_COUNTER,
     LATENCY_HISTOGRAM,
+    OUTBOX_DEAD_LETTER_GAUGE,
+    OUTBOX_PENDING_GAUGE,
     RATE_LIMIT_COUNTER,
     REQUEST_COUNTER,
     RISK_SCORE_HISTOGRAM,
@@ -193,11 +195,36 @@ def readyz(db: Session = Depends(get_db)) -> dict:
 
 
 @app.get("/metrics")
-def metrics_endpoint(request: Request):
+def metrics_endpoint(
+    request: Request,
+    db: Session = Depends(get_db),
+):
     if settings.environment.lower() == "prod":
         supplied_key = request.headers.get("X-Metrics-API-Key", "")
-        if not settings.metrics_api_key or not constant_time_equals(hash_secret(supplied_key), hash_secret(settings.metrics_api_key)):
+        if not settings.metrics_api_key or not constant_time_equals(
+            hash_secret(supplied_key),
+            hash_secret(settings.metrics_api_key),
+        ):
             raise HTTPException(status_code=401, detail="invalid_metrics_key")
+
+    pending_count = db.scalar(
+        select(func.count())
+        .select_from(OutboxEvent)
+        .where(
+            OutboxEvent.delivered.is_(False),
+            OutboxEvent.dead_lettered.is_(False),
+        )
+    )
+
+    dead_letter_count = db.scalar(
+        select(func.count())
+        .select_from(OutboxEvent)
+        .where(OutboxEvent.dead_lettered.is_(True))
+    )
+
+    OUTBOX_PENDING_GAUGE.set(pending_count or 0)
+    OUTBOX_DEAD_LETTER_GAUGE.set(dead_letter_count or 0)
+
     return metrics_response()
 
 
