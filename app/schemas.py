@@ -64,3 +64,29 @@ class DecisionResponse(BaseModel):
     trace_id: str
     decision_version: str
     idempotency_key: str
+    policy_matched: bool = False
+    policy_name: Optional[str] = None
+
+class PolicyCreate(BaseModel):
+    tenant_id: str
+    name: str
+    effect: Literal["allow", "deny"]
+    priority: int = 100
+
+    request_types: list[str] = []
+    countries: list[str] = []
+    device_ids: list[str] = []
+
+    max_risk_score: Optional[int] = None
+    enabled: bool = True
+
+class PolicyUpdate(BaseModel):
+    effect: Optional[Literal["allow", "deny"]] = None
+    priority: Optional[int] = None
+
+    request_types: Optional[list[str]] = None
+    countries: Optional[list[str]] = None
+    device_ids: Optional[list[str]] = None
+
+    max_risk_score: Optional[int] = None
+    enabled: Optional[bool] = None

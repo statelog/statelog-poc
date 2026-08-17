@@ -86,3 +86,68 @@ def test_priority_wins():
     assert decision.matched is True
     assert decision.allow is False
     assert decision.policy_name == "priority-deny"
+
+def test_higher_priority_policy_wins():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="low-priority-allow",
+                effect="allow",
+                priority=100,
+                request_types=("access",),
+                countries=("EE",),
+            ),
+            Policy(
+                name="high-priority-deny",
+                effect="deny",
+                priority=10,
+                request_types=("access",),
+                countries=("EE",),
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is False
+    assert decision.policy_name == "high-priority-deny"
+    assert decision.reason == "policy_deny:high-priority-deny"
+
+
+def test_higher_priority_allow_wins_over_lower_priority_deny():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="low-priority-deny",
+                effect="deny",
+                priority=100,
+                request_types=("access",),
+                countries=("EE",),
+            ),
+            Policy(
+                name="high-priority-allow",
+                effect="allow",
+                priority=5,
+                request_types=("access",),
+                countries=("EE",),
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "high-priority-allow"
+    assert decision.reason == "policy_allow:high-priority-allow"

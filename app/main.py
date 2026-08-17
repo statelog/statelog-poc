@@ -17,7 +17,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from .risk_engine import RiskEngine
-from .policy_engine import PolicyEngine
+from .policy_engine import Policy, PolicyEngine
 
 from .config import settings
 from .database import get_db
@@ -33,11 +33,10 @@ from .metrics import (
     RISK_SCORE_HISTOGRAM,
     metrics_response,
 )
-from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription
+from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription, PolicyRecord
 from .rate_limit import HybridRateLimiter
 from .replay_protection import HybridReplayStore
 from .risk_engine import RiskEngine
-from .policy_engine import PolicyEngine
 from .schemas import (
     AccessRequest,
     AccessRightCreate,
@@ -48,6 +47,8 @@ from .schemas import (
     TenantCreate,
     TokenIssueRequest,
     WebhookCreate,
+    PolicyCreate,
+    PolicyUpdate
 )
 from .security import build_request_fingerprint, constant_time_equals, decode_access_token, encrypt_secret, get_active_signing_key, hash_secret, hash_with_pepper, issue_access_token
 from .services.auth_service import enforce_right_owner
@@ -63,6 +64,41 @@ templates = Jinja2Templates(directory="app/templates")
 risk_engine = RiskEngine()
 policy_engine = PolicyEngine()
 decision_cache: dict[str, tuple[float, dict]] = {}
+
+def load_tenant_policies(db: Session, tenant_id: str) -> PolicyEngine:
+    records = (
+        db.query(PolicyRecord)
+        .filter_by(tenant_id=tenant_id, enabled=True)
+        .order_by(PolicyRecord.priority.asc())
+        .all()
+    )
+
+    policies = [
+        Policy(
+            name=record.name,
+            effect=record.effect,
+            priority=record.priority,
+            request_types=tuple(
+                value.strip()
+                for value in record.request_types.split(",")
+                if value.strip()
+            ),
+            countries=tuple(
+                value.strip()
+                for value in record.countries.split(",")
+                if value.strip()
+            ),
+            device_ids=tuple(
+                value.strip()
+                for value in record.device_ids.split(",")
+                if value.strip()
+            ),
+            max_risk_score=record.max_risk_score,
+        )
+        for record in records
+    ]
+
+    return PolicyEngine(policies)
 
 try:
     redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
@@ -274,6 +310,165 @@ def create_client(payload: ClientCreate, _: str = Depends(get_admin), db: Sessio
     return {"tenant_id": payload.tenant_id, "client_id": payload.client_id}
 
 
+@app.post("/admin/policies")
+def create_policy(
+    payload: PolicyCreate,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    if not db.get(Tenant, payload.tenant_id):
+        raise HTTPException(status_code=404, detail="tenant_not_found")
+
+    policy = PolicyRecord(
+        tenant_id=payload.tenant_id,
+        name=payload.name,
+        effect=payload.effect,
+        priority=payload.priority,
+        request_types=",".join(payload.request_types),
+        countries=",".join(payload.countries),
+        device_ids=",".join(payload.device_ids),
+        max_risk_score=payload.max_risk_score,
+        enabled=payload.enabled,
+    )
+
+    db.add(policy)
+    commit_or_409(db, detail="policy_exists")
+
+    return {
+        "id": policy.id,
+        "tenant_id": policy.tenant_id,
+        "name": policy.name,
+        "effect": policy.effect,
+        "priority": policy.priority,
+        "request_types": payload.request_types,
+        "countries": payload.countries,
+        "device_ids": payload.device_ids,
+        "max_risk_score": policy.max_risk_score,
+        "enabled": policy.enabled,
+    }
+
+
+@app.patch("/admin/policies/{policy_id}")
+def update_policy(
+    policy_id: int,
+    payload: PolicyUpdate,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    policy = db.get(PolicyRecord, policy_id)
+
+    if not policy:
+        raise HTTPException(status_code=404, detail="policy_not_found")
+
+    if payload.effect is not None:
+        policy.effect = payload.effect
+
+    if payload.priority is not None:
+        policy.priority = payload.priority
+
+    if payload.request_types is not None:
+        policy.request_types = ",".join(payload.request_types)
+
+    if payload.countries is not None:
+        policy.countries = ",".join(payload.countries)
+
+    if payload.device_ids is not None:
+        policy.device_ids = ",".join(payload.device_ids)
+
+    if payload.max_risk_score is not None:
+        policy.max_risk_score = payload.max_risk_score
+
+    if payload.enabled is not None:
+        policy.enabled = payload.enabled
+
+    db.commit()
+    db.refresh(policy)
+
+    return {
+        "id": policy.id,
+        "tenant_id": policy.tenant_id,
+        "name": policy.name,
+        "effect": policy.effect,
+        "priority": policy.priority,
+        "request_types": [
+            value.strip()
+            for value in policy.request_types.split(",")
+            if value.strip()
+        ],
+        "countries": [
+            value.strip()
+            for value in policy.countries.split(",")
+            if value.strip()
+        ],
+        "device_ids": [
+            value.strip()
+            for value in policy.device_ids.split(",")
+            if value.strip()
+        ],
+        "max_risk_score": policy.max_risk_score,
+        "enabled": policy.enabled,
+    }
+
+@app.get("/admin/policies")
+def list_policies(
+    tenant_id: str,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    policies = (
+        db.query(PolicyRecord)
+        .filter_by(tenant_id=tenant_id)
+        .order_by(PolicyRecord.priority.asc(), PolicyRecord.id.asc())
+        .all()
+    )
+
+    return [
+        {
+            "id": policy.id,
+            "tenant_id": policy.tenant_id,
+            "name": policy.name,
+            "effect": policy.effect,
+            "priority": policy.priority,
+            "request_types": [
+                value.strip()
+                for value in policy.request_types.split(",")
+                if value.strip()
+            ],
+            "countries": [
+                value.strip()
+                for value in policy.countries.split(",")
+                if value.strip()
+            ],
+            "device_ids": [
+                value.strip()
+                for value in policy.device_ids.split(",")
+                if value.strip()
+            ],
+            "max_risk_score": policy.max_risk_score,
+            "enabled": policy.enabled,
+        }
+        for policy in policies
+    ]
+
+
+@app.delete("/admin/policies/{policy_id}")
+def delete_policy(
+    policy_id: int,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    policy = db.get(PolicyRecord, policy_id)
+
+    if not policy:
+        raise HTTPException(status_code=404, detail="policy_not_found")
+
+    db.delete(policy)
+    db.commit()
+
+    return {
+        "deleted": True,
+        "policy_id": policy_id,
+    }
 @app.post("/admin/devices")
 def create_device(payload: DeviceCreate, db: Session = Depends(get_db), client: ClientCredential = Depends(get_client)):
     if client.tenant_id != payload.tenant_id:
@@ -473,6 +668,23 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
 
     allowed = decision.allow
     reason = decision.reason
+
+    tenant_policy_engine = load_tenant_policies(db, tenant.id)
+
+    policy_decision = tenant_policy_engine.evaluate(
+        request_type=payload.request_type,
+        device_id=payload.device_id,
+        country_code=payload.country_code,
+        risk_score=decision.risk_score,
+    )
+
+    if policy_decision.matched and not policy_decision.allow:
+        allowed = False
+        reason = policy_decision.reason
+    elif policy_decision.matched and decision.allow:
+        allowed = True
+        reason = policy_decision.reason
+
     if payload.request_type == "ownership_transfer":
         if not payload.new_owner_id:
             allowed = False
@@ -501,6 +713,8 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         allowed=allowed,
         risk_score=decision.risk_score,
         reason=reason,
+        policy_matched=policy_decision.matched,
+        policy_name=policy_decision.policy_name,
         trace_id=trace,
         idempotency_key=idempotency_key,
         token_jti=claims.get("jti"),
@@ -508,18 +722,41 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         user_agent=user_agent,
         decision_version=settings.request_decision_version,
     )
+
     tenant.usage_count += 1
     db.add(log)
+
+
     emit_event(
         db,
         tenant.id,
         "decision.allowed" if allowed else "decision.denied",
-        {"trace_id": trace, "right_id": right.right_id, "risk_score": decision.risk_score, "allowed": allowed},
+        {
+            "trace_id": trace,
+            "right_id": right.right_id,
+            "risk_score": decision.risk_score,
+            "allowed": allowed,
+        },
     )
-    emit_event(db, tenant.id, "billing.usage.incremented", {"tenant_id": tenant.id, "usage_count": tenant.usage_count})
+
+    emit_event(
+        db,
+        tenant.id,
+        "billing.usage.incremented",
+        {
+            "tenant_id": tenant.id,
+            "usage_count": tenant.usage_count,
+        },
+    )
+
     commit_or_409(db, detail="duplicate_request")
 
-    REQUEST_COUNTER.labels(tenant_id=tenant.id, result="allow" if allowed else "deny", request_type=payload.request_type).inc()
+    REQUEST_COUNTER.labels(
+        tenant_id=tenant.id,
+        result="allow" if allowed else "deny",
+        request_type=payload.request_type,
+    ).inc()
+
     RISK_SCORE_HISTOGRAM.observe(decision.risk_score)
     LATENCY_HISTOGRAM.observe(time.perf_counter() - started)
 
@@ -530,9 +767,13 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         "trace_id": trace,
         "decision_version": settings.request_decision_version,
         "idempotency_key": idempotency_key,
+        "policy_matched": policy_decision.matched,
+        "policy_name": policy_decision.policy_name,
     }
+
     if payload.request_type == "access" and allowed:
         cache_set(cache_key, response)
+
     return DecisionResponse(**response)
 
 

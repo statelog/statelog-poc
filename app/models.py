@@ -75,6 +75,8 @@ class RequestLog(Base):
     allowed: Mapped[bool] = mapped_column(Boolean)
     risk_score: Mapped[int] = mapped_column(Integer, default=0)
     reason: Mapped[str] = mapped_column(String(255))
+    policy_matched: Mapped[bool] = mapped_column(Boolean, default=False)
+    policy_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     idempotency_key: Mapped[str] = mapped_column(String(128), index=True)
     token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
@@ -126,3 +128,42 @@ class WebhookDeliveryAttempt(Base):
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     signature_version: Mapped[str] = mapped_column(String(16), default='v1')
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+
+class PolicyRecord(Base):
+    __tablename__ = "policies"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_policy_name_per_tenant"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id"),
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(String(100), index=True)
+    effect: Mapped[str] = mapped_column(String(16))
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+
+    request_types: Mapped[str] = mapped_column(Text, default="")
+    countries: Mapped[str] = mapped_column(Text, default="")
+    device_ids: Mapped[str] = mapped_column(Text, default="")
+
+    max_risk_score: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow_naive,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow_naive,
+        onupdate=utcnow_naive,
+    )
