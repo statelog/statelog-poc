@@ -1,3 +1,4 @@
+from datetime import datetime
 from app.models import PolicyRecord, RequestLog
 from app.models import PolicyRecord
 
@@ -276,3 +277,179 @@ def test_risk_deny_cannot_be_overridden_by_allow_policy(client):
 
     # Deny wins: policy allow cannot override RiskEngine deny.
     assert body["allow"] is False
+
+def test_future_policy_does_not_apply(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="future-deny",
+                effect="deny",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                enabled=True,
+                valid_from=datetime(2099, 1, 1),
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["allow"] is True
+
+def test_expired_policy_does_not_apply(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="expired-deny",
+                effect="deny",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                enabled=True,
+                expires_at=datetime(2020, 1, 1),
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["allow"] is True
+
+def test_risk_signals_are_exposed_in_response(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"old-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80,
+                    reason="previous_denial",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"signal-trace-{i}",
+                    idempotency_key=f"signal-idem-{i}",
+                    request_fingerprint=f"signal-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        ip_address="10.10.10.99",
+        country_code="FI",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "risk_signals" in body
+    assert "failure_burst" in body["risk_signals"]
+    assert "new_ip" in body["risk_signals"]
+    assert "geo_change" in body["risk_signals"]
+
+def test_risk_signals_are_written_to_request_log(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"old-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80,
+                    reason="previous_denial",
+                    risk_signals="failure_burst",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"audit-signal-trace-{i}",
+                    idempotency_key=f"audit-signal-idem-{i}",
+                    request_fingerprint=f"audit-signal-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        ip_address="10.10.10.99",
+        country_code="FI",
+    )
+
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .order_by(RequestLog.id.desc())
+            .first()
+        )
+
+        assert log is not None
+        assert "failure_burst" in log.risk_signals
+        assert "new_ip" in log.risk_signals
+        assert "geo_change" in log.risk_signals
+
+def test_trust_score_is_exposed_in_response(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "trust_score" in body
+    assert 0 <= body["trust_score"] <= 100
+    assert body["trust_score"] == max(
+        0,
+        min(100, 100 - body["risk_score"]),
+    )

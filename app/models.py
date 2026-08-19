@@ -75,6 +75,7 @@ class RequestLog(Base):
     allowed: Mapped[bool] = mapped_column(Boolean)
     risk_score: Mapped[int] = mapped_column(Integer, default=0)
     reason: Mapped[str] = mapped_column(String(255))
+    risk_signals: Mapped[str] = mapped_column(Text, default="")
     policy_matched: Mapped[bool] = mapped_column(Boolean, default=False)
     policy_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
@@ -155,7 +156,22 @@ class PolicyRecord(Base):
         nullable=True,
     )
 
+    min_trust_score: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    valid_from: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

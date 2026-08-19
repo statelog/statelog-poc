@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from app.policy_engine import Policy, PolicyEngine
 
 
@@ -151,3 +152,56 @@ def test_higher_priority_allow_wins_over_lower_priority_deny():
     assert decision.allow is True
     assert decision.policy_name == "high-priority-allow"
     assert decision.reason == "policy_allow:high-priority-allow"
+
+def test_policy_not_active_before_valid_from():
+    now = datetime(2026, 8, 19, 12, 0, 0)
+
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="future-policy",
+                effect="deny",
+                priority=10,
+                request_types=("access",),
+                valid_from=now + timedelta(hours=1),
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        context={"now": now},
+    )
+
+    assert decision.matched is False
+    assert decision.reason == "no_policy_match"
+
+
+def test_policy_not_active_after_expires_at():
+    now = datetime(2026, 8, 19, 12, 0, 0)
+
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="expired-policy",
+                effect="deny",
+                priority=10,
+                request_types=("access",),
+                expires_at=now - timedelta(minutes=1),
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        context={"now": now},
+    )
+
+    assert decision.matched is False
+    assert decision.reason == "no_policy_match"

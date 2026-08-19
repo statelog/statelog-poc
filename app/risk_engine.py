@@ -12,7 +12,9 @@ from .time_utils import utcnow_naive
 class RiskDecision:
     allow: bool
     risk_score: int
+    trust_score: int
     reason: str
+    signals: tuple[str, ...] = ()
 
 
 class RiskEngine:
@@ -59,5 +61,18 @@ class RiskEngine:
                 reasons.append("sensitive_action")
 
         if score >= 70:
-            return RiskDecision(allow=False, risk_score=score, reason=",".join(reasons) or "deny")
-        return RiskDecision(allow=True, risk_score=score, reason=",".join(reasons) or "allowed")
+            return RiskDecision(
+                allow=False,
+                risk_score=score,
+                trust_score=max(0, min(100, 100 - score)),
+                reason=";".join(reasons) or "deny",
+                signals=tuple(reasons),
+            )
+
+        return RiskDecision(
+            allow=True,
+            risk_score=score,
+            trust_score=max(0, min(100, 100 - score)),
+            reason=";".join(reasons) or "allowed",
+            signals=tuple(reasons),
+        )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -13,7 +14,9 @@ class Policy:
     countries: tuple[str, ...] = ()
     device_ids: tuple[str, ...] = ()
     max_risk_score: int | None = None
-
+    min_trust_score: int | None = None
+    valid_from: datetime | None = None
+    expires_at: datetime | None = None
 
 @dataclass(frozen=True)
 class PolicyDecision:
@@ -37,17 +40,29 @@ class PolicyEngine:
         device_id: str,
         country_code: str,
         risk_score: int,
+        trust_score: int | None = None,
         context: dict[str, Any] | None = None,
     ) -> PolicyDecision:
-        del context
+        context = context or {}
+        now = context.get("now")
+
+        if trust_score is None:
+            trust_score = max(0, min(100, 100 - risk_score))
 
         for policy in self.policies:
+            if now is not None:
+                if policy.valid_from is not None and now < policy.valid_from:
+                    continue
+
+            if policy.expires_at is not None and now > policy.expires_at:
+                continue         
             if not self._matches(
                 policy,
                 request_type=request_type,
                 device_id=device_id,
                 country_code=country_code,
                 risk_score=risk_score,
+                trust_score=trust_score,
             ):
                 continue
 
@@ -83,6 +98,7 @@ class PolicyEngine:
         device_id: str,
         country_code: str,
         risk_score: int,
+        trust_score: int,
     ) -> bool:
         if policy.request_types and request_type not in policy.request_types:
             return False
@@ -94,6 +110,8 @@ class PolicyEngine:
             return False
 
         if policy.max_risk_score is not None and risk_score > policy.max_risk_score:
+            return False
+        if policy.min_trust_score is not None and trust_score < policy.min_trust_score:
             return False
 
         return True

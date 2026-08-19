@@ -94,6 +94,9 @@ def load_tenant_policies(db: Session, tenant_id: str) -> PolicyEngine:
                 if value.strip()
             ),
             max_risk_score=record.max_risk_score,
+            min_trust_score=record.min_trust_score,
+            valid_from=record.valid_from,
+            expires_at=record.expires_at,
         )
         for record in records
     ]
@@ -328,7 +331,10 @@ def create_policy(
         countries=",".join(payload.countries),
         device_ids=",".join(payload.device_ids),
         max_risk_score=payload.max_risk_score,
+        min_trust_score=payload.min_trust_score,
         enabled=payload.enabled,
+        valid_from=payload.valid_from,
+        expires_at=payload.expires_at,
     )
 
     db.add(policy)
@@ -344,7 +350,10 @@ def create_policy(
         "countries": payload.countries,
         "device_ids": payload.device_ids,
         "max_risk_score": policy.max_risk_score,
+        "min_trust_score": policy.min_trust_score,
         "enabled": policy.enabled,
+        "valid_from": policy.valid_from,
+        "expires_at": policy.expires_at,
     }
 
 
@@ -378,8 +387,17 @@ def update_policy(
     if payload.max_risk_score is not None:
         policy.max_risk_score = payload.max_risk_score
 
+    if payload.min_trust_score is not None:
+        policy.min_trust_score = payload.min_trust_score
+
     if payload.enabled is not None:
         policy.enabled = payload.enabled
+
+    if payload.valid_from is not None:
+        policy.valid_from = payload.valid_from
+
+    if payload.expires_at is not None:
+        policy.expires_at = payload.expires_at
 
     db.commit()
     db.refresh(policy)
@@ -407,6 +425,8 @@ def update_policy(
         ],
         "max_risk_score": policy.max_risk_score,
         "enabled": policy.enabled,
+        "valid_from": policy.valid_from,
+        "expires_at": policy.expires_at,
     }
 
 @app.get("/admin/policies")
@@ -446,6 +466,8 @@ def list_policies(
             ],
             "max_risk_score": policy.max_risk_score,
             "enabled": policy.enabled,
+            "valid_from": policy.valid_from,
+            "expires_at": policy.expires_at,
         }
         for policy in policies
     ]
@@ -676,6 +698,8 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         device_id=payload.device_id,
         country_code=payload.country_code,
         risk_score=decision.risk_score,
+        trust_score=decision.trust_score,
+        context={"now": utcnow_naive()},
     )
 
     if policy_decision.matched and not policy_decision.allow:
@@ -713,6 +737,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         allowed=allowed,
         risk_score=decision.risk_score,
         reason=reason,
+        risk_signals=",".join(decision.signals),
         policy_matched=policy_decision.matched,
         policy_name=policy_decision.policy_name,
         trace_id=trace,
@@ -764,6 +789,8 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         "allow": allowed,
         "reason": reason,
         "risk_score": decision.risk_score,
+        "trust_score": decision.trust_score,
+        "risk_signals": list(decision.signals),
         "trace_id": trace,
         "decision_version": settings.request_decision_version,
         "idempotency_key": idempotency_key,

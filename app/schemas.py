@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -61,11 +62,13 @@ class DecisionResponse(BaseModel):
     allow: bool
     reason: str
     risk_score: int
+    trust_score: int
     trace_id: str
     decision_version: str
     idempotency_key: str
     policy_matched: bool = False
     policy_name: Optional[str] = None
+    risk_signals: list[str] = []
 
 class PolicyCreate(BaseModel):
     tenant_id: str
@@ -78,7 +81,10 @@ class PolicyCreate(BaseModel):
     device_ids: list[str] = []
 
     max_risk_score: Optional[int] = None
+    min_trust_score: Optional[int] = None
     enabled: bool = True
+    valid_from: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
 
 class PolicyUpdate(BaseModel):
     effect: Optional[Literal["allow", "deny"]] = None
@@ -89,4 +95,7 @@ class PolicyUpdate(BaseModel):
     device_ids: Optional[list[str]] = None
 
     max_risk_score: Optional[int] = None
+    min_trust_score: Optional[int] = None
     enabled: Optional[bool] = None
+    valid_from: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
