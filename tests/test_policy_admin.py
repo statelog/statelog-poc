@@ -228,3 +228,192 @@ def test_update_missing_policy_returns_404(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "policy_not_found"
+
+def test_policy_update_increments_version(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "versioned-policy",
+            "effect": "deny",
+            "priority": 10,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["version"] == 1
+
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "priority": 5,
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+def test_policy_update_creates_history_snapshot(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-policy",
+            "effect": "deny",
+            "priority": 10,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+    assert created.json()["version"] == 1
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "priority": 5,
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+    from app.database import SessionLocal
+    from app.models import PolicyHistory, PolicyRecord
+
+    with SessionLocal() as db:
+        history = (
+            db.query(PolicyHistory)
+            .filter_by(policy_id=policy_id)
+            .order_by(PolicyHistory.id.desc())
+            .first()
+        )
+
+        active_policy = db.get(PolicyRecord, policy_id)
+
+        assert history is not None
+        assert history.version == 1
+        assert history.priority == 10
+
+        assert active_policy is not None
+        assert active_policy.version == 2
+
+def test_policy_history_endpoint_returns_snapshots(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-api-policy",
+            "effect": "deny",
+            "priority": 10,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "priority": 5,
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+    history = client.get(
+        f"/admin/policies/{policy_id}/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert history.status_code == 200
+
+    items = history.json()
+
+    assert len(items) == 1
+    assert items[0]["policy_id"] == policy_id
+    assert items[0]["policy_name"] == "history-api-policy"
+    assert items[0]["version"] == 1
+    assert items[0]["priority"] == 10
+
+def test_policy_history_unknown_policy_returns_404(client):
+    response = client.get(
+        "/admin/policies/999999/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "policy_not_found"
+
+
+def test_policy_history_keeps_multiple_versions(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "multi-history-policy",
+            "effect": "deny",
+            "priority": 30,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    first_update = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"priority": 20},
+    )
+    assert first_update.status_code == 200
+    assert first_update.json()["version"] == 2
+
+    second_update = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"priority": 10},
+    )
+    assert second_update.status_code == 200
+    assert second_update.json()["version"] == 3
+
+    history = client.get(
+        f"/admin/policies/{policy_id}/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert history.status_code == 200
+
+    items = history.json()
+
+    assert [item["version"] for item in items] == [1, 2]
+    assert [item["priority"] for item in items] == [30, 20]

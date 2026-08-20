@@ -33,7 +33,7 @@ from .metrics import (
     RISK_SCORE_HISTOGRAM,
     metrics_response,
 )
-from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription, PolicyRecord
+from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription, PolicyRecord, PolicyHistory
 from .rate_limit import HybridRateLimiter
 from .replay_protection import HybridReplayStore
 from .risk_engine import RiskEngine
@@ -95,6 +95,7 @@ def load_tenant_policies(db: Session, tenant_id: str) -> PolicyEngine:
             ),
             max_risk_score=record.max_risk_score,
             min_trust_score=record.min_trust_score,
+            version=record.version,
             valid_from=record.valid_from,
             expires_at=record.expires_at,
         )
@@ -102,6 +103,27 @@ def load_tenant_policies(db: Session, tenant_id: str) -> PolicyEngine:
     ]
 
     return PolicyEngine(policies)
+
+
+def save_policy_history(db: Session, policy: PolicyRecord) -> None:
+    history = PolicyHistory(
+        policy_id=policy.id,
+        tenant_id=policy.tenant_id,
+        policy_name=policy.name,
+        version=policy.version,
+        effect=policy.effect,
+        priority=policy.priority,
+        request_types=policy.request_types,
+        countries=policy.countries,
+        device_ids=policy.device_ids,
+        max_risk_score=policy.max_risk_score,
+        min_trust_score=policy.min_trust_score,
+        enabled=policy.enabled,
+        valid_from=policy.valid_from,
+        expires_at=policy.expires_at,
+    )
+    db.add(history)
+
 
 try:
     redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
@@ -346,6 +368,7 @@ def create_policy(
         "name": policy.name,
         "effect": policy.effect,
         "priority": policy.priority,
+        "version": policy.version,
         "request_types": payload.request_types,
         "countries": payload.countries,
         "device_ids": payload.device_ids,
@@ -368,6 +391,8 @@ def update_policy(
 
     if not policy:
         raise HTTPException(status_code=404, detail="policy_not_found")
+    
+    save_policy_history(db, policy)
 
     if payload.effect is not None:
         policy.effect = payload.effect
@@ -399,6 +424,8 @@ def update_policy(
     if payload.expires_at is not None:
         policy.expires_at = payload.expires_at
 
+    policy.version += 1
+
     db.commit()
     db.refresh(policy)
 
@@ -408,6 +435,7 @@ def update_policy(
         "name": policy.name,
         "effect": policy.effect,
         "priority": policy.priority,
+        "version": policy.version,
         "request_types": [
             value.strip()
             for value in policy.request_types.split(",")
@@ -423,6 +451,7 @@ def update_policy(
             for value in policy.device_ids.split(",")
             if value.strip()
         ],
+        "max_risk_score": policy.max_risk_score,
         "max_risk_score": policy.max_risk_score,
         "enabled": policy.enabled,
         "valid_from": policy.valid_from,
@@ -449,6 +478,7 @@ def list_policies(
             "name": policy.name,
             "effect": policy.effect,
             "priority": policy.priority,
+            "version": policy.version,
             "request_types": [
                 value.strip()
                 for value in policy.request_types.split(",")
@@ -464,6 +494,7 @@ def list_policies(
                 for value in policy.device_ids.split(",")
                 if value.strip()
             ],
+            "max_risk_score": policy.max_risk_score,
             "max_risk_score": policy.max_risk_score,
             "enabled": policy.enabled,
             "valid_from": policy.valid_from,
@@ -491,6 +522,57 @@ def delete_policy(
         "deleted": True,
         "policy_id": policy_id,
     }
+@app.get("/admin/policies/{policy_id}/history")
+def get_policy_history(
+    policy_id: int,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    policy = db.get(PolicyRecord, policy_id)
+
+    if not policy:
+        raise HTTPException(status_code=404, detail="policy_not_found")
+
+    history = (
+        db.query(PolicyHistory)
+        .filter_by(policy_id=policy_id)
+        .order_by(PolicyHistory.version.asc())
+        .all()
+    )
+
+    return [
+        {
+            "id": item.id,
+            "policy_id": item.policy_id,
+            "tenant_id": item.tenant_id,
+            "policy_name": item.policy_name,
+            "version": item.version,
+            "effect": item.effect,
+            "priority": item.priority,
+            "request_types": [
+                value.strip()
+                for value in item.request_types.split(",")
+                if value.strip()
+            ],
+            "countries": [
+                value.strip()
+                for value in item.countries.split(",")
+                if value.strip()
+            ],
+            "device_ids": [
+                value.strip()
+                for value in item.device_ids.split(",")
+                if value.strip()
+            ],
+            "max_risk_score": item.max_risk_score,
+            "min_trust_score": item.min_trust_score,
+            "enabled": item.enabled,
+            "valid_from": item.valid_from,
+            "expires_at": item.expires_at,
+            "created_at": item.created_at,
+        }
+        for item in history
+    ]
 @app.post("/admin/devices")
 def create_device(payload: DeviceCreate, db: Session = Depends(get_db), client: ClientCredential = Depends(get_client)):
     if client.tenant_id != payload.tenant_id:
@@ -740,6 +822,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         risk_signals=",".join(decision.signals),
         policy_matched=policy_decision.matched,
         policy_name=policy_decision.policy_name,
+        policy_version=policy_decision.policy_version,
         trace_id=trace,
         idempotency_key=idempotency_key,
         token_jti=claims.get("jti"),

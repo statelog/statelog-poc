@@ -10,6 +10,7 @@ class Policy:
     name: str
     effect: str
     priority: int = 100
+    version: int = 1
     request_types: tuple[str, ...] = ()
     countries: tuple[str, ...] = ()
     device_ids: tuple[str, ...] = ()
@@ -24,6 +25,7 @@ class PolicyDecision:
     allow: bool | None
     reason: str
     policy_name: str | None = None
+    policy_version: int | None = None
 
 
 class PolicyEngine:
@@ -74,6 +76,7 @@ class PolicyEngine:
                     allow=False,
                     reason=f"policy_deny:{policy.name}",
                     policy_name=policy.name,
+                    policy_version=policy.version,
                 )
 
             if effect == "allow":
@@ -82,6 +85,7 @@ class PolicyEngine:
                     allow=True,
                     reason=f"policy_allow:{policy.name}",
                     policy_name=policy.name,
+                    policy_version=policy.version,
                 )
 
         return PolicyDecision(

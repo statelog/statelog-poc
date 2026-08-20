@@ -205,3 +205,39 @@ def test_policy_not_active_after_expires_at():
 
     assert decision.matched is False
     assert decision.reason == "no_policy_match"
+
+def test_min_trust_score_policy_matching():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="high-trust-only",
+                effect="allow",
+                priority=10,
+                request_types=("access",),
+                min_trust_score=70,
+            )
+        ]
+    )
+
+    low_trust = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=40,
+        trust_score=60,
+    )
+
+    high_trust = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=20,
+        trust_score=80,
+    )
+
+    assert low_trust.matched is False
+    assert low_trust.reason == "no_policy_match"
+
+    assert high_trust.matched is True
+    assert high_trust.allow is True
+    assert high_trust.policy_name == "high-trust-only"

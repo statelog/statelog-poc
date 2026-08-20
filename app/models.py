@@ -78,6 +78,10 @@ class RequestLog(Base):
     risk_signals: Mapped[str] = mapped_column(Text, default="")
     policy_matched: Mapped[bool] = mapped_column(Boolean, default=False)
     policy_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    policy_version: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     idempotency_key: Mapped[str] = mapped_column(String(128), index=True)
     token_jti: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
@@ -146,7 +150,8 @@ class PolicyRecord(Base):
     name: Mapped[str] = mapped_column(String(100), index=True)
     effect: Mapped[str] = mapped_column(String(16))
     priority: Mapped[int] = mapped_column(Integer, default=100)
-
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    
     request_types: Mapped[str] = mapped_column(Text, default="")
     countries: Mapped[str] = mapped_column(Text, default="")
     device_ids: Mapped[str] = mapped_column(Text, default="")
@@ -162,7 +167,7 @@ class PolicyRecord(Base):
     )
 
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    
+
     valid_from: Mapped[datetime | None] = mapped_column(
         DateTime,
         nullable=True,
@@ -182,4 +187,38 @@ class PolicyRecord(Base):
         DateTime,
         default=utcnow_naive,
         onupdate=utcnow_naive,
+    )
+
+class PolicyHistory(Base):
+    __tablename__ = "policy_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    policy_id: Mapped[int] = mapped_column(Integer, index=True)
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id"),
+        index=True,
+    )
+
+    policy_name: Mapped[str] = mapped_column(String(100))
+    version: Mapped[int] = mapped_column(Integer)
+
+    effect: Mapped[str] = mapped_column(String(16))
+    priority: Mapped[int] = mapped_column(Integer)
+
+    request_types: Mapped[str] = mapped_column(Text, default="")
+    countries: Mapped[str] = mapped_column(Text, default="")
+    device_ids: Mapped[str] = mapped_column(Text, default="")
+
+    max_risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    min_trust_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow_naive,
     )

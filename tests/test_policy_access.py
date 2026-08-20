@@ -453,3 +453,136 @@ def test_trust_score_is_exposed_in_response(client):
         0,
         min(100, 100 - body["risk_score"]),
     )
+
+def test_min_trust_score_policy_in_access_flow(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="high-trust-access",
+                effect="allow",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=90,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["trust_score"] >= 90
+    assert body["policy_matched"] is True
+    assert body["policy_name"] == "high-trust-access"
+
+def test_min_trust_score_policy_does_not_match_low_trust(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="high-trust-only",
+                effect="allow",
+                priority=1,
+                request_types="access",
+                countries="FI",
+                device_ids="gate-A1",
+                max_risk_score=None,
+                min_trust_score=90,
+                enabled=True,
+            )
+        )
+
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"low-trust-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80,
+                    reason="previous_denial",
+                    risk_signals="failure_burst",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"low-trust-trace-{i}",
+                    idempotency_key=f"low-trust-idem-{i}",
+                    request_fingerprint=f"low-trust-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_ids="gate-A1",
+        ip_address="10.10.10.99",
+        country_code="FI",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["trust_score"] < 90
+    assert body["policy_name"] != "high-trust-only"
+
+def test_policy_version_is_written_to_request_log(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="version-audit-policy",
+            effect="deny",
+            priority=1,
+            version=2,
+            request_types="access",
+            countries="EE",
+            device_ids="",
+            max_risk_score=None,
+            min_trust_score=None,
+            enabled=True,
+        )
+        db.add(policy)
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is False
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .order_by(RequestLog.id.desc())
+            .first()
+        )
+
+        assert log is not None
+        assert log.policy_name == "version-audit-policy"
+        assert log.policy_version == 2
