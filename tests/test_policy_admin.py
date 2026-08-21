@@ -1,5 +1,6 @@
-from tests.test_smoke import ADMIN_HEADERS, ensure_setup
-
+from tests.test_smoke import ADMIN_HEADERS, ensure_setup, issue_token, access_request
+from app.database import SessionLocal
+from app.models import PolicyRecord, RequestLog
 
 def test_create_policy(client):
     ensure_setup(client)
@@ -417,3 +418,393 @@ def test_policy_history_keeps_multiple_versions(client):
 
     assert [item["version"] for item in items] == [1, 2]
     assert [item["priority"] for item in items] == [30, 20]
+
+def test_admin_audit_logs_returns_request_logs(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) >= 1
+
+    latest = items[0]
+
+    assert latest["tenant_id"] == "tenant-demo"
+    assert latest["right_id"] == "right-001"
+    assert latest["request_type"] == "access"
+    assert isinstance(latest["allowed"], bool)
+    assert "risk_score" in latest
+    assert "risk_signals" in latest
+    assert "trace_id" in latest
+
+def test_admin_audit_logs_can_filter_denied_requests(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="audit-deny-policy",
+                effect="deny",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    response = access_request(client, token)
+    assert response.status_code == 200
+    assert response.json()["allow"] is False
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "allowed": "false",
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) >= 1
+    assert all(item["allowed"] is False for item in items)
+
+def test_admin_audit_logs_can_filter_by_policy_name(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="audit-policy-filter",
+                effect="deny",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is False
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "audit-policy-filter",
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) >= 1
+    assert all(
+        item["policy_name"] == "audit-policy-filter"
+        for item in items
+    )
+
+def test_admin_audit_logs_can_filter_by_policy_version(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="audit-version-policy",
+                effect="deny",
+                priority=1,
+                version=2,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is False
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": 2,
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) >= 1
+    assert all(item["policy_version"] == 2 for item in items)
+
+def test_admin_audit_logs_can_filter_by_min_risk_score(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "min_risk_score": 0,
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) >= 1
+    assert all(item["risk_score"] >= 0 for item in items)
+
+def test_admin_audit_logs_can_filter_by_risk_signal(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"signal-filter-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80,
+                    reason="previous_denial",
+                    risk_signals="failure_burst,new_ip",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_version=None,
+                    trace_id=f"signal-filter-trace-{i}",
+                    idempotency_key=f"signal-filter-idem-{i}",
+                    request_fingerprint=f"signal-filter-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                )
+            )
+        db.commit()
+
+    response = access_request(
+        client,
+        token,
+        ip_address="10.10.10.99",
+        country_code="FI",
+    )
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "failure_burst",
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) >= 1
+    assert all("failure_burst" in item["risk_signals"] for item in items)
+
+def test_admin_audit_logs_can_filter_by_from_time(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2020-01-01T00:00:00",
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) >= 1
+
+def test_admin_audit_logs_can_filter_by_to_time(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "to_time": "2099-01-01T00:00:00",
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) >= 1
+
+def test_admin_audit_logs_respects_limit(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    first = access_request(client, token)
+    assert first.status_code == 200
+
+    second_token = issue_token(client).json()["token"]
+    second = access_request(
+        client,
+        second_token,
+        ip_address="10.0.0.11",
+    )
+    assert second.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": 1,
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) == 1
+
+def test_admin_audit_logs_caps_limit_at_500(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": 10000,
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) <= 500
+
+def test_admin_audit_logs_respects_offset(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    first = access_request(client, token)
+    assert first.status_code == 200
+
+    second_token = issue_token(client).json()["token"]
+    second = access_request(
+        client,
+        second_token,
+        ip_address="10.0.0.22",
+    )
+    assert second.status_code == 200
+
+    first_page = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": 1,
+            "offset": 0,
+        },
+    )
+
+    second_page = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": 1,
+            "offset": 1,
+        },
+    )
+
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+
+    first_items = first_page.json()
+    second_items = second_page.json()
+
+    assert len(first_items) == 1
+    assert len(second_items) == 1
+    assert first_items[0]["id"] != second_items[0]["id"]

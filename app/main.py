@@ -6,6 +6,7 @@ import time
 import uuid
 import jwt
 from typing import Optional
+from datetime import datetime
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -923,6 +924,73 @@ def tenant_dashboard(tenant_id: str, request: Request, db: Session = Depends(get
     logs = list(db.scalars(select(RequestLog).where(RequestLog.tenant_id == tenant_id).order_by(RequestLog.created_at.desc()).limit(20)))
     return templates.TemplateResponse("tenant.html", {"request": request, "tenant": tenant, "rights": rights, "logs": logs})
 
+@app.get("/admin/audit/logs")
+def get_audit_logs(
+    tenant_id: str,
+    allowed: bool | None = None,
+    policy_name: str | None = None,
+    policy_version: int | None = None,
+    min_risk_score: int | None = None,
+    risk_signal: str | None = None,
+    from_time: datetime | None = None,
+    to_time: datetime | None = None,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+    limit: int = 100,
+    offset: int = 0,
+):
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)   
+    query = (
+        select(RequestLog)
+        .where(RequestLog.tenant_id == tenant_id)
+        .order_by(RequestLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+
+    if policy_version is not None:
+        query = query.where(RequestLog.policy_version == policy_version)
+
+    if allowed is not None:
+        query = query.where(RequestLog.allowed == allowed)
+
+    if policy_name is not None:
+        query = query.where(RequestLog.policy_name == policy_name)
+    
+    if min_risk_score is not None:
+        query = query.where(RequestLog.risk_score >= min_risk_score)
+
+    if risk_signal is not None:
+        query = query.where(RequestLog.risk_signals.contains(risk_signal))
+
+    if from_time is not None:
+        query = query.where(RequestLog.created_at >= from_time)
+
+    if to_time is not None:
+        query = query.where(RequestLog.created_at <= to_time)
+
+    logs = list(db.scalars(query))
+
+    return [
+        {
+            "id": log.id,
+            "tenant_id": log.tenant_id,
+            "right_id": log.right_id,
+            "device_id": log.device_id,
+            "request_type": log.request_type,
+            "allowed": log.allowed,
+            "risk_score": log.risk_score,
+            "risk_signals": log.risk_signals,
+            "reason": log.reason,
+            "policy_matched": log.policy_matched,
+            "policy_name": log.policy_name,
+            "policy_version": log.policy_version,
+            "trace_id": log.trace_id,
+            "created_at": log.created_at,
+        }
+        for log in logs
+    ]
 
 @app.get("/")
 def root():
