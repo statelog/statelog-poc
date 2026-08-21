@@ -924,6 +924,57 @@ def tenant_dashboard(tenant_id: str, request: Request, db: Session = Depends(get
     logs = list(db.scalars(select(RequestLog).where(RequestLog.tenant_id == tenant_id).order_by(RequestLog.created_at.desc()).limit(20)))
     return templates.TemplateResponse("tenant.html", {"request": request, "tenant": tenant, "rights": rights, "logs": logs})
 
+def build_audit_log_query(
+    tenant_id: str,
+    allowed: bool | None = None,
+    policy_name: str | None = None,
+    policy_version: int | None = None,
+    min_risk_score: int | None = None,
+    risk_signal: str | None = None,
+    from_time: datetime | None = None,
+    to_time: datetime | None = None,
+):
+    query = select(RequestLog).where(
+        RequestLog.tenant_id == tenant_id
+    )
+
+    if policy_version is not None:
+        query = query.where(
+            RequestLog.policy_version == policy_version
+        )
+
+    if allowed is not None:
+        query = query.where(
+            RequestLog.allowed == allowed
+        )
+
+    if policy_name is not None:
+        query = query.where(
+            RequestLog.policy_name == policy_name
+        )
+
+    if min_risk_score is not None:
+        query = query.where(
+            RequestLog.risk_score >= min_risk_score
+        )
+
+    if risk_signal is not None:
+        query = query.where(
+            RequestLog.risk_signals.contains(risk_signal)
+        )
+
+    if from_time is not None:
+        query = query.where(
+            RequestLog.created_at >= from_time
+        )
+
+    if to_time is not None:
+        query = query.where(
+            RequestLog.created_at <= to_time
+        )
+
+    return query
+
 @app.get("/admin/audit/logs")
 def get_audit_logs(
     tenant_id: str,
@@ -940,35 +991,25 @@ def get_audit_logs(
     offset: int = 0,
 ):
     limit = max(1, min(limit, 500))
-    offset = max(0, offset)   
+    offset = max(0, offset)
+
+    query = build_audit_log_query(
+        tenant_id=tenant_id,
+        allowed=allowed,
+        policy_name=policy_name,
+        policy_version=policy_version,
+        min_risk_score=min_risk_score,
+        risk_signal=risk_signal,
+        from_time=from_time,
+        to_time=to_time,
+    )
+
     query = (
-        select(RequestLog)
-        .where(RequestLog.tenant_id == tenant_id)
+        query
         .order_by(RequestLog.created_at.desc())
         .offset(offset)
         .limit(limit)
     )
-
-    if policy_version is not None:
-        query = query.where(RequestLog.policy_version == policy_version)
-
-    if allowed is not None:
-        query = query.where(RequestLog.allowed == allowed)
-
-    if policy_name is not None:
-        query = query.where(RequestLog.policy_name == policy_name)
-    
-    if min_risk_score is not None:
-        query = query.where(RequestLog.risk_score >= min_risk_score)
-
-    if risk_signal is not None:
-        query = query.where(RequestLog.risk_signals.contains(risk_signal))
-
-    if from_time is not None:
-        query = query.where(RequestLog.created_at >= from_time)
-
-    if to_time is not None:
-        query = query.where(RequestLog.created_at <= to_time)
 
     logs = list(db.scalars(query))
 
@@ -991,6 +1032,36 @@ def get_audit_logs(
         }
         for log in logs
     ]
+
+@app.get("/admin/audit/logs/count")
+def get_audit_log_count(
+    tenant_id: str,
+    allowed: bool | None = None,
+    policy_name: str | None = None,
+    policy_version: int | None = None,
+    min_risk_score: int | None = None,
+    risk_signal: str | None = None,
+    from_time: datetime | None = None,
+    to_time: datetime | None = None,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    query = build_audit_log_query(
+        tenant_id=tenant_id,
+        allowed=allowed,
+        policy_name=policy_name,
+        policy_version=policy_version,
+        min_risk_score=min_risk_score,
+        risk_signal=risk_signal,
+        from_time=from_time,
+        to_time=to_time,
+    )
+
+    total = db.scalar(
+        select(func.count()).select_from(query.subquery())
+    )
+
+    return {"total": total or 0}
 
 @app.get("/")
 def root():

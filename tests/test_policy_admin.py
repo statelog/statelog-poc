@@ -808,3 +808,75 @@ def test_admin_audit_logs_respects_offset(client):
     assert len(first_items) == 1
     assert len(second_items) == 1
     assert first_items[0]["id"] != second_items[0]["id"]
+
+def test_admin_audit_log_count_returns_total(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    first = access_request(client, token)
+    assert first.status_code == 200
+
+    second_token = issue_token(client).json()["token"]
+    second = access_request(
+        client,
+        second_token,
+        ip_address="10.0.0.33",
+    )
+    assert second.status_code == 200
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+        },
+    )
+
+    assert count.status_code == 200
+
+    body = count.json()
+
+    assert "total" in body
+    assert body["total"] >= 2
+
+def test_admin_audit_log_count_respects_allowed_filter(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="count-deny-policy",
+                effect="deny",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    response = access_request(client, token)
+    assert response.status_code == 200
+    assert response.json()["allow"] is False
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "allowed": "false",
+        },
+    )
+
+    assert count.status_code == 200
+
+    body = count.json()
+
+    assert body["total"] >= 1
