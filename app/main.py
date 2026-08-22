@@ -889,12 +889,32 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
                 "reason": policy_decision.reason,
             },
     "final": {
-        "allow": allowed,
-        "reason": reason,
-        "decision_source": (
-        "policy"
-        if policy_decision.matched
-        else "risk"
+    "allow": allowed,
+    "reason": reason,
+    "decision_source": (
+        "risk"
+        if not decision.allow
+        else (
+            "policy"
+            if policy_decision.matched
+            else "risk"
+        )
+    ),
+    "decision_path": (
+        [
+            "risk_evaluated",
+            "policy_checked",
+            (
+                "policy_matched"
+                if policy_decision.matched
+                else "no_policy_match"
+            ),
+            (
+                "final_allow"
+                if allowed
+                else "final_deny"
+            ),
+        ]
     ),
 },
         },

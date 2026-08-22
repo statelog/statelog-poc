@@ -7,6 +7,7 @@ from tests.test_smoke import HEADERS, ensure_setup, issue_token, access_request
 
 def test_access_without_policy_uses_risk_decision(client):
     ensure_setup(client)
+   
     token = issue_token(client).json()["token"]
 
     response = access_request(client, token)
@@ -259,6 +260,7 @@ def test_risk_deny_cannot_be_overridden_by_allow_policy(client):
     assert token_response.status_code == 200
     token = token_response.json()["token"]
 
+
     response = access_request(
         client,
         token,
@@ -266,7 +268,6 @@ def test_risk_deny_cannot_be_overridden_by_allow_policy(client):
         ip_address="10.10.10.99",
         country_code="FI",
     )
-
     assert response.status_code == 200
 
     body = response.json()
@@ -363,13 +364,19 @@ def test_risk_signals_are_exposed_in_response(client):
 
         db.commit()
 
-    token = issue_token(client).json()["token"]
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
 
     response = access_request(
         client,
         token,
+        device_id="gate-A1",
         ip_address="10.10.10.99",
         country_code="FI",
+        request_type="ownership_transfer",
+        new_owner_id="user-456",
     )
 
     assert response.status_code == 200
@@ -537,7 +544,7 @@ def test_min_trust_score_policy_does_not_match_low_trust(client):
     response = access_request(
         client,
         token,
-        device_ids="gate-A1",
+        device_id="gate-A1",
         ip_address="10.10.10.99",
         country_code="FI",
     )
@@ -662,3 +669,162 @@ def test_explanation_decision_source_is_policy_when_policy_matches(client):
     assert body["policy_matched"] is True
     assert body["policy_name"] == "source-deny-policy"
     assert body["explanation"]["final"]["decision_source"] == "policy"
+
+def test_explanation_decision_path_without_policy(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+    path = body["explanation"]["final"]["decision_path"]
+
+    assert path == [
+        "risk_evaluated",
+        "policy_checked",
+        "no_policy_match",
+        "final_allow",
+    ]
+
+
+def test_explanation_decision_path_with_deny_policy(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="decision-path-deny",
+                effect="deny",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+    path = body["explanation"]["final"]["decision_path"]
+
+    assert path == [
+        "risk_evaluated",
+        "policy_checked",
+        "policy_matched",
+        "final_deny",
+    ]
+
+def test_explanation_includes_policy_version(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="explain-version-policy",
+                effect="deny",
+                priority=1,
+                version=3,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["policy_name"] == "explain-version-policy"
+    assert body["explanation"]["policy"]["name"] == "explain-version-policy"
+    assert body["explanation"]["policy"]["version"] == 3
+
+def test_explanation_shows_risk_as_final_source_when_risk_denies(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="allow-high-risk-explanation",
+                effect="allow",
+                priority=1,
+                request_types="ownership_transfer",
+                countries="FI",
+                device_ids="gate-A1",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"explain-risk-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80,
+                    reason="previous_denial",
+                    risk_signals="failure_burst",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_version=None,
+                    trace_id=f"explain-risk-trace-{i}",
+                    idempotency_key=f"explain-risk-idem-{i}",
+                    request_fingerprint=f"explain-risk-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.10.10.99",
+        country_code="FI",
+        request_type="ownership_transfer",
+        new_owner_id="user-456",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["risk_score"] >= 70
+    assert body["policy_matched"] is True
+    assert body["policy_name"] == "allow-high-risk-explanation"
+    assert body["allow"] is False
+    assert body["explanation"]["final"]["decision_source"] == "risk"
