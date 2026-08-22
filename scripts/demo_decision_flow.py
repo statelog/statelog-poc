@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.database import Base, SessionLocal, engine
 from app.main import app, decision_cache, rate_limiter, replay_store
-from app.models import RequestLog
+from app.models import RequestLog, PolicyRecord
 from tests.test_smoke import ensure_setup, issue_token, access_request
 
 
@@ -181,11 +181,64 @@ def main():
             risky_response.json(),
         )
 
+        # ---------------------------------------------------------
+        # SCENARIO C: POLICY-BASED DENY
+        # ---------------------------------------------------------
+
+        with SessionLocal() as db:
+            db.add(
+                PolicyRecord(
+                    tenant_id="tenant-demo",
+                    name="deny-gate-a1",
+                    effect="deny",
+                    priority=1,
+                    request_types="access",
+                    countries="EE",
+                    device_ids="gate-A1",
+                    max_risk_score=None,
+                    min_trust_score=None,
+                    enabled=True,
+                )
+            )
+            db.commit()
+
+        policy_token_response = issue_token(client)
+
+        if policy_token_response.status_code != 200:
+            raise RuntimeError(
+                f"Policy token issuance failed: "
+                f"{policy_token_response.status_code} "
+                f"{policy_token_response.text}"
+            )
+
+        policy_token = policy_token_response.json()["token"]
+
+        policy_response = access_request(
+            client,
+            policy_token,
+            device_id="gate-A1",
+            ip_address="10.0.0.10",
+            country_code="EE",
+            request_type="access",
+        )
+
+        if policy_response.status_code != 200:
+            raise RuntimeError(
+                f"Policy access failed: "
+                f"{policy_response.status_code} "
+                f"{policy_response.text}"
+            )
+
+        print_decision(
+            "SCENARIO C - POLICY-BASED DENY",
+            policy_response.json(),
+        )
         print("\n" + "=" * 60)
         print("DEMO SUMMARY")
         print("=" * 60)
         print("Scenario A: normal behaviour -> ALLOW")
         print("Scenario B: accumulated risk -> DENY")
+        print("Scenario C: policy rule -> DENY")
         print("Both decisions include explainability and traceability.")
         print("=" * 60)
 
