@@ -17,7 +17,7 @@ from redis.exceptions import RedisError
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
-from .risk_engine import RiskEngine
+from .risk_engine import RiskEngine, RISK_SIGNAL_SCORES
 from .policy_engine import Policy, PolicyEngine
 
 from .config import settings
@@ -876,13 +876,20 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         "trust_score": decision.trust_score,
         "risk_signals": list(decision.signals),
         "explanation": {
-            "risk": {
-                "score": decision.risk_score,
-                "trust_score": decision.trust_score,
-                "signals": list(decision.signals),
-                "reason": decision.reason,
-            },
-            "policy": {
+        "risk": {
+            "score": decision.risk_score,
+            "trust_score": decision.trust_score,
+            "signals": list(decision.signals),
+            "contributors": [
+                {
+                    "signal": signal,
+                    "score": RISK_SIGNAL_SCORES.get(signal, 0),
+                }
+                for signal in decision.signals    
+            ],
+            "reason": decision.reason,
+        },
+        "policy": {
                 "matched": policy_decision.matched,
                 "name": policy_decision.policy_name,
                 "version": policy_decision.policy_version,

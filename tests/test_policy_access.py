@@ -828,3 +828,39 @@ def test_explanation_shows_risk_as_final_source_when_risk_denies(client):
     assert body["policy_name"] == "allow-high-risk-explanation"
     assert body["allow"] is False
     assert body["explanation"]["final"]["decision_source"] == "risk"
+
+def test_explanation_risk_signals_match_top_level(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["explanation"]["risk"]["signals"] == body["risk_signals"]
+
+def test_explanation_risk_contributors_show_signal_scores(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+    contributors = body["explanation"]["risk"]["contributors"]
+
+    expected_scores = {
+        "failure_burst": 35,
+        "new_device": 15,
+        "new_ip": 10,
+        "geo_change": 15,
+        "transfer_velocity": 30,
+        "sensitive_action": 10,
+    }
+
+    for contributor in contributors:
+        assert contributor["signal"] in expected_scores
+        assert contributor["score"] == expected_scores[contributor["signal"]]

@@ -7,6 +7,14 @@ from typing import Iterable
 from .models import RequestLog
 from .time_utils import utcnow_naive
 
+RISK_SIGNAL_SCORES = {
+    "failure_burst": 35,
+    "new_device": 15,
+    "new_ip": 10,
+    "geo_change": 15,
+    "transfer_velocity": 30,
+    "sensitive_action": 10,
+}
 
 @dataclass
 class RiskDecision:
@@ -34,30 +42,30 @@ class RiskEngine:
 
         recent_failures = [l for l in logs if (now - l.created_at) <= timedelta(minutes=15) and not l.allowed]
         if len(recent_failures) >= 3:
-            score += 35
+            score += RISK_SIGNAL_SCORES["failure_burst"]
             reasons.append("failure_burst")
 
         recent_logs = logs[-5:]
         if recent_logs and all(l.device_id != device_id for l in recent_logs):
-            score += 15
+            score += RISK_SIGNAL_SCORES["new_device"]
             reasons.append("new_device")
 
         if recent_logs and all(l.ip_hash != ip_address for l in recent_logs):
-            score += 10
+            score += RISK_SIGNAL_SCORES["new_ip"]
             reasons.append("new_ip")
 
         recent_countries = {l.country_code for l in logs[-10:]}
         if recent_countries and country_code not in recent_countries:
-            score += 15
+            score += RISK_SIGNAL_SCORES["geo_change"]
             reasons.append("geo_change")
 
         if request_type == "ownership_transfer":
             recent_transfers = [l for l in logs if l.request_type == "ownership_transfer" and (now - l.created_at) <= timedelta(hours=1)]
             if len(recent_transfers) >= 2:
-                score += 30
+                score += RISK_SIGNAL_SCORES["transfer_velocity"]
                 reasons.append("transfer_velocity")
             else:
-                score += 10
+                score += RISK_SIGNAL_SCORES["sensitive_action"]
                 reasons.append("sensitive_action")
 
         if score >= 70:
