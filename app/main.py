@@ -875,6 +875,29 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         "risk_score": decision.risk_score,
         "trust_score": decision.trust_score,
         "risk_signals": list(decision.signals),
+        "explanation": {
+            "risk": {
+                "score": decision.risk_score,
+                "trust_score": decision.trust_score,
+                "signals": list(decision.signals),
+                "reason": decision.reason,
+            },
+            "policy": {
+                "matched": policy_decision.matched,
+                "name": policy_decision.policy_name,
+                "version": policy_decision.policy_version,
+                "reason": policy_decision.reason,
+            },
+    "final": {
+        "allow": allowed,
+        "reason": reason,
+        "decision_source": (
+        "policy"
+        if policy_decision.matched
+        else "risk"
+    ),
+},
+        },
         "trace_id": trace,
         "decision_version": settings.request_decision_version,
         "idempotency_key": idempotency_key,

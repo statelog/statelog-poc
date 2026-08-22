@@ -69,6 +69,7 @@ class DecisionResponse(BaseModel):
     policy_matched: bool = False
     policy_name: Optional[str] = None
     risk_signals: list[str] = []
+    explanation: dict = {}
 
 class PolicyCreate(BaseModel):
     tenant_id: str

@@ -586,3 +586,79 @@ def test_policy_version_is_written_to_request_log(client):
         assert log is not None
         assert log.policy_name == "version-audit-policy"
         assert log.policy_version == 2
+
+def test_access_response_exposes_structured_explanation(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "explanation" in body
+
+    explanation = body["explanation"]
+
+    assert "risk" in explanation
+    assert "policy" in explanation
+    assert "final" in explanation
+
+    assert explanation["risk"]["score"] == body["risk_score"]
+    assert explanation["risk"]["trust_score"] == body["trust_score"]
+    assert explanation["risk"]["signals"] == body["risk_signals"]
+
+    assert explanation["policy"]["matched"] == body["policy_matched"]
+    assert explanation["policy"]["name"] == body["policy_name"]
+
+    assert explanation["final"]["allow"] == body["allow"]
+    assert explanation["final"]["reason"] == body["reason"]
+
+def test_explanation_decision_source_is_risk_without_policy(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["policy_matched"] is False
+    assert body["explanation"]["final"]["decision_source"] == "risk"
+
+
+def test_explanation_decision_source_is_policy_when_policy_matches(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="source-deny-policy",
+                effect="deny",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["policy_matched"] is True
+    assert body["policy_name"] == "source-deny-policy"
+    assert body["explanation"]["final"]["decision_source"] == "policy"
