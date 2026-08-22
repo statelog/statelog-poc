@@ -102,3 +102,60 @@ Statelog is actively looking for pilot projects, design partners and technical c
 ---
 
 **Copyright © Statelog. All Rights Reserved.**
+
+## Quick Demo
+
+Statelog includes a one-command end-to-end decision demo.
+
+Run from the project root:
+
+```bash
+python demo.py
+```
+
+The demo executes three decision scenarios:
+
+### Scenario A - Normal Access
+
+A normal low-risk request is evaluated and allowed.
+
+- Result: ALLOW
+- Risk score: 0
+- Decision source: risk
+
+### Scenario B - High-Risk Ownership Transfer
+
+Accumulated risk signals trigger a denial.
+
+The decision includes individual risk contributors such as:
+
+- failure burst
+- new IP
+- geographic change
+- sensitive action
+
+- Result: DENY
+- Risk threshold: 70
+- Decision source: risk
+
+### Scenario C - Policy-Based Deny
+
+A matching policy denies the request even when the risk score is below the risk-denial threshold.
+
+- Result: DENY
+- Policy matched: true
+- Decision source: policy
+
+Each decision exposes:
+
+- risk and trust scores
+- risk signal contributions
+- policy match information
+- final decision source
+- decision path
+- trace ID
+- decision version
+
+This demonstrates Statelog's explainable and traceable decision pipeline:
+
+**Request -> Risk Evaluation -> Policy Evaluation -> Final Decision -> Explanation -> Trace**
