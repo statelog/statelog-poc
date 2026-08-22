@@ -36,16 +36,27 @@ Completed
 
 ---
 
-# Phase 3 — Policy & Intelligence
+# Phase 3 - Policy & Intelligence
 
-Planned
+In Progress
 
-* Advanced authorization policies
+Completed:
+
+* Advanced authorization policies ✅
+* Risk scoring engine ✅
+* Policy-based allow/deny decisions ✅
+* Risk-aware decision precedence ✅
+* Policy versioning and validity windows ✅
+* Explainable risk signal contributions ✅
+* Structured decision explanations and decision path ✅
+* End-to-end decision demo ✅
+
+Next:
+
 * Dynamic business rules
 * Configurable decision workflows
-* Risk scoring engine
 * Policy simulation
-* Administrative policy management
+* Administration policy management
 
 ---
 

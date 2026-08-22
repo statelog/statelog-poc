@@ -71,6 +71,14 @@ class DecisionResponse(BaseModel):
     risk_signals: list[str] = []
     explanation: dict = {}
 
+class PolicySimulationRequest(BaseModel):
+    tenant_id: str
+    request_type: str
+    device_id: str
+    country_code: str
+    risk_score: int
+    trust_score: Optional[int] = None
+
 class PolicyCreate(BaseModel):
     tenant_id: str
     name: str

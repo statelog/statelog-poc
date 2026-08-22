@@ -27,6 +27,14 @@ class PolicyDecision:
     policy_name: str | None = None
     policy_version: int | None = None
 
+@dataclass(frozen=True)
+class PolicySimulation:
+    decision: PolicyDecision
+    evaluated_policies: int
+    matched: bool
+    policy_name: str | None
+    policy_version: int | None
+
 
 class PolicyEngine:
     def __init__(self, policies: Iterable[Policy] | None = None) -> None:
@@ -92,6 +100,33 @@ class PolicyEngine:
             matched=False,
             allow=None,
             reason="no_policy_match",
+        )
+
+    def simulate(
+        self,
+        *,
+        request_type: str,
+        device_id: str,
+        country_code: str,
+        risk_score: int,
+        trust_score: int | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> PolicySimulation:
+        decision = self.evaluate(
+            request_type=request_type,
+            device_id=device_id,
+            country_code=country_code,
+            risk_score=risk_score,
+            trust_score=trust_score,
+            context=context,
+        )
+
+        return PolicySimulation(
+            decision=decision,
+            evaluated_policies=len(self.policies),
+            matched=decision.matched,
+            policy_name=decision.policy_name,
+            policy_version=decision.policy_version,
         )
 
     @staticmethod

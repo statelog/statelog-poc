@@ -241,3 +241,96 @@ def test_min_trust_score_policy_matching():
     assert high_trust.matched is True
     assert high_trust.allow is True
     assert high_trust.policy_name == "high-trust-only"
+
+def test_policy_simulation_reports_matching_policy():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="simulation-deny",
+                effect="deny",
+                priority=1,
+                version=3,
+                request_types=("access",),
+                countries=("EE",),
+                device_ids=("gate-A1",),
+            )
+        ]
+    )
+
+    simulation = engine.simulate(
+        request_type="access",
+        device_id="gate-A1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert simulation.matched is True
+    assert simulation.policy_name == "simulation-deny"
+    assert simulation.policy_version == 3
+    assert simulation.evaluated_policies == 1
+    assert simulation.decision.allow is False
+
+def test_policy_simulation_reports_no_match():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="simulation-fi-only",
+                effect="deny",
+                priority=1,
+                version=2,
+                request_types=("access",),
+                countries=("FI",),
+                device_ids=("gate-A1",),
+            )
+        ]
+    )
+
+    simulation = engine.simulate(
+        request_type="access",
+        device_id="gate-A1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert simulation.matched is False
+    assert simulation.policy_name is None
+    assert simulation.policy_version is None
+    assert simulation.evaluated_policies == 1
+    assert simulation.decision.allow is None
+    assert simulation.decision.reason == "no_policy_match"
+
+def test_policy_simulation_is_repeatable_and_side_effect_free():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="repeatable-deny",
+                effect="deny",
+                priority=1,
+                version=4,
+                request_types=("access",),
+                countries=("FI",),
+            )
+        ]
+    )
+
+    first = engine.simulate(
+        request_type="access",
+        device_id="gate-A1",
+        country_code="FI",
+        risk_score=20,
+        trust_score=80,
+    )
+
+    second = engine.simulate(
+        request_type="access",
+        device_id="gate-A1",
+        country_code="FI",
+        risk_score=20,
+        trust_score=80,
+    )
+
+    assert first == second
+    assert len(engine.policies) == 1
+    assert engine.policies[0].name == "repeatable-deny"

@@ -880,3 +880,93 @@ def test_admin_audit_log_count_respects_allowed_filter(client):
     body = count.json()
 
     assert body["total"] >= 1
+
+def test_admin_can_simulate_matching_policy(client):
+    ensure_setup(client)
+
+    create = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "simulation-api-deny",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": None,
+            "min_trust_score": None,
+            "enabled": True,
+        },
+    )
+
+    assert create.status_code == 200
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 90,
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["matched"] is True
+    assert body["allow"] is False
+    assert body["policy_name"] == "simulation-api-deny"
+    assert body["evaluated_policies"] >= 1
+
+def test_admin_policy_simulation_reports_no_match(client):
+    ensure_setup(client)
+
+    create = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "simulation-fi-only",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["FI"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": None,
+            "min_trust_score": None,
+            "enabled": True,
+        },
+    )
+
+    assert create.status_code == 200
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 90,
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["matched"] is False
+    assert body["allow"] is None
+    assert body["reason"] == "no_policy_match"
+    assert body["policy_name"] is None
+    assert body["policy_version"] is None
+    assert body["evaluated_policies"] >= 1

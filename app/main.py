@@ -49,6 +49,7 @@ from .schemas import (
     TokenIssueRequest,
     WebhookCreate,
     PolicyCreate,
+    PolicySimulationRequest,
     PolicyUpdate
 )
 from .security import build_request_fingerprint, constant_time_equals, decode_access_token, encrypt_secret, get_active_signing_key, hash_secret, hash_with_pepper, issue_access_token
@@ -335,6 +336,73 @@ def create_client(payload: ClientCreate, _: str = Depends(get_admin), db: Sessio
     commit_or_409(db, detail="client_exists")
     return {"tenant_id": payload.tenant_id, "client_id": payload.client_id}
 
+@app.post("/admin/policies/simulate")
+def simulate_policy(
+    payload: PolicySimulationRequest,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    if not db.get(Tenant, payload.tenant_id):
+        raise HTTPException(
+            status_code=404,
+            detail="tenant_not_found",
+        )
+
+    engine = load_tenant_policies(
+        db,
+        payload.tenant_id,
+    )
+
+    simulation = engine.simulate(
+        request_type=payload.request_type,
+        device_id=payload.device_id,
+        country_code=payload.country_code,
+        risk_score=payload.risk_score,
+        trust_score=payload.trust_score,
+    )
+
+    return {
+        "matched": simulation.matched,
+        "allow": simulation.decision.allow,
+        "reason": simulation.decision.reason,
+        "policy_name": simulation.policy_name,
+        "policy_version": simulation.policy_version,
+        "evaluated_policies": simulation.evaluated_policies,
+    }
+
+@app.post("/admin/policies/simulate")
+def simulate_policy(
+    payload: PolicySimulationRequest,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    if not db.get(Tenant, payload.tenant_id):
+        raise HTTPException(
+            status_code=404,
+            detail="tenant_not_found",
+        )
+
+    engine = load_tenant_policies(
+        db,
+        payload.tenant_id,
+    )
+
+    simulation = engine.simulate(
+        request_type=payload.request_type,
+        device_id=payload.device_id,
+        country_code=payload.country_code,
+        risk_score=payload.risk_score,
+        trust_score=payload.trust_score,
+    )
+
+    return {
+        "matched": simulation.matched,
+        "allow": simulation.decision.allow,
+        "reason": simulation.decision.reason,
+        "policy_name": simulation.policy_name,
+        "policy_version": simulation.policy_version,
+        "evaluated_policies": simulation.evaluated_policies,
+    }
 
 @app.post("/admin/policies")
 def create_policy(
