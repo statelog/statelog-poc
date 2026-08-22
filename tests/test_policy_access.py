@@ -952,3 +952,55 @@ def test_explanation_policy_fields_match_top_level(client):
 
     assert body["explanation"]["policy"]["matched"] == body["policy_matched"]
     assert body["explanation"]["policy"]["name"] == body["policy_name"]
+
+def test_end_to_end_policy_risk_explainability_and_audit(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="e2e-deny-policy",
+                effect="deny",
+                priority=1,
+                version=4,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["allow"] is False
+    assert body["policy_matched"] is True
+    assert body["policy_name"] == "e2e-deny-policy"
+
+    assert body["explanation"]["policy"]["name"] == "e2e-deny-policy"
+    assert body["explanation"]["policy"]["version"] == 4
+    assert body["explanation"]["final"]["decision_source"] == "policy"
+
+    assert body["explanation"]["risk"]["score"] == body["risk_score"]
+    assert body["explanation"]["risk"]["trust_score"] == body["trust_score"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .order_by(RequestLog.id.desc())
+            .first()
+        )
+
+        assert log is not None
+        assert log.policy_name == "e2e-deny-policy"
+        assert log.policy_version == 4
+        assert log.allowed is False
