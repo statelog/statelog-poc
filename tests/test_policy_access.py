@@ -864,3 +864,21 @@ def test_explanation_risk_contributors_show_signal_scores(client):
     for contributor in contributors:
         assert contributor["signal"] in expected_scores
         assert contributor["score"] == expected_scores[contributor["signal"]]
+
+def test_explanation_risk_total_contribution_matches_contributors(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+    risk = body["explanation"]["risk"]
+
+    expected_total = sum(
+        contributor["score"]
+        for contributor in risk["contributors"]
+    )
+
+    assert risk["total_contribution"] == expected_total

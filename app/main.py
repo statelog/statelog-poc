@@ -880,6 +880,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
             "score": decision.risk_score,
             "trust_score": decision.trust_score,
             "signals": list(decision.signals),
+            "total_contribution": sum(RISK_SIGNAL_SCORES.get(signal, 0) for signal in decision.signals),
             "contributors": [
                 {
                     "signal": signal,
