@@ -882,3 +882,73 @@ def test_explanation_risk_total_contribution_matches_contributors(client):
     )
 
     assert risk["total_contribution"] == expected_total
+
+def test_explanation_risk_score_matches_top_level(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["explanation"]["risk"]["score"] == body["risk_score"]
+
+def test_explanation_trust_score_matches_top_level(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert (
+        body["explanation"]["risk"]["trust_score"]
+        == body["trust_score"]
+    )
+
+def test_explanation_total_contribution_covers_risk_score(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+    risk = body["explanation"]["risk"]
+
+    assert risk["total_contribution"] >= risk["score"]
+
+def test_explanation_policy_fields_match_top_level(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="explanation-consistency-policy",
+                effect="deny",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                max_risk_score=None,
+                min_trust_score=None,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["explanation"]["policy"]["matched"] == body["policy_matched"]
+    assert body["explanation"]["policy"]["name"] == body["policy_name"]
