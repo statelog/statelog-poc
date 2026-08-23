@@ -363,3 +363,29 @@ def test_risk_deny_cannot_be_overridden_by_policy_allow():
         "risk_evaluated",
         "final_deny",
     )
+
+def test_policy_deny_cannot_be_overridden_by_risk_allow():
+    from app.workflow_engine import WorkflowConfig
+
+    engine = WorkflowEngine(
+        WorkflowConfig(
+            include_risk_step=True,
+            include_policy_step=True,
+            execution_mode="risk_first",
+        )
+    )
+
+    decision = engine.evaluate(
+        risk_allowed=True,
+        policy_matched=True,
+        policy_allowed=False,
+        final_allowed=False,
+    )
+
+    assert decision.decision_source == "policy"
+    assert decision.decision_path == (
+        "risk_evaluated",
+        "policy_checked",
+        "policy_matched",
+        "final_deny",
+    )
