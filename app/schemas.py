@@ -71,6 +71,7 @@ class DecisionResponse(BaseModel):
     trust_score: int
     trace_id: str
     decision_version: str
+    workflow_version: int = 1
     idempotency_key: str
     policy_matched: bool = False
     policy_name: Optional[str] = None

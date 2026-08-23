@@ -465,6 +465,7 @@ def get_workflow_config(
             "include_risk_step": True,
             "include_policy_step": True,
             "execution_mode": "risk_first",
+            "version": 1,
         }
 
     return {
@@ -1094,6 +1095,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         },
         "trace_id": trace,
         "decision_version": settings.request_decision_version,
+        "workflow_version": workflow_config_record.version if workflow_config_record is not None else 1,
         "idempotency_key": idempotency_key,
         "policy_matched": policy_decision.matched,
         "policy_name": policy_decision.policy_name,

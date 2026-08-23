@@ -433,3 +433,18 @@ def test_workflow_resolve_allowed_enforces_deny_wins():
         policy_matched=True,
         policy_allowed=False,
     ) is False
+
+def test_default_workflow_config_has_version_one(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/workflow-config/tenant-demo",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["tenant_id"] == "tenant-demo"
+    assert body["version"] == 1

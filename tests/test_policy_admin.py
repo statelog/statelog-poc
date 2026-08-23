@@ -482,6 +482,9 @@ def test_admin_audit_log_records_workflow_version(client):
 
     assert response.status_code == 200
 
+    response_body = response.json()
+    assert response_body["workflow_version"] == 2
+
     audit = client.get(
         "/admin/audit/logs",
         headers=ADMIN_HEADERS,
@@ -503,6 +506,7 @@ def test_admin_audit_log_records_workflow_version(client):
 
     assert len(matching) == 1
     assert matching[0]["workflow_version"] == 2
+    assert matching[0]["workflow_version"] == response_body["workflow_version"]
 
 def test_admin_audit_logs_can_filter_denied_requests(client):
     ensure_setup(client)
