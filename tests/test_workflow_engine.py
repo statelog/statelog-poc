@@ -126,6 +126,7 @@ def test_admin_can_create_and_update_workflow_config(client):
             "tenant_id": "tenant-demo",
             "include_risk_step": False,
             "include_policy_step": True,
+            "execution_mode": "policy_first",
         },
     )
 
@@ -136,6 +137,7 @@ def test_admin_can_create_and_update_workflow_config(client):
     assert created["tenant_id"] == "tenant-demo"
     assert created["include_risk_step"] is False
     assert created["include_policy_step"] is True
+    assert created["execution_mode"] == "policy_first"
 
     update_response = client.put(
         "/admin/workflow-config",
@@ -144,6 +146,7 @@ def test_admin_can_create_and_update_workflow_config(client):
             "tenant_id": "tenant-demo",
             "include_risk_step": True,
             "include_policy_step": False,
+            "execution_mode": "risk_first",
         },
     )
 
@@ -153,6 +156,7 @@ def test_admin_can_create_and_update_workflow_config(client):
 
     assert updated["include_risk_step"] is True
     assert updated["include_policy_step"] is False
+    assert updated["execution_mode"] == "risk_first"
 
 def test_access_flow_uses_tenant_workflow_config(client):
     ensure_setup(client)
@@ -193,6 +197,7 @@ def test_admin_can_read_workflow_config(client):
             "tenant_id": "tenant-demo",
             "include_risk_step": False,
             "include_policy_step": True,
+            "execution_mode": "policy_first",
         },
     )
 
@@ -210,6 +215,7 @@ def test_admin_can_read_workflow_config(client):
     assert body["tenant_id"] == "tenant-demo"
     assert body["include_risk_step"] is False
     assert body["include_policy_step"] is True
+    assert body["execution_mode"] == "policy_first"
 
 def test_admin_reads_default_workflow_config_when_none_exists(client):
     ensure_setup(client)
