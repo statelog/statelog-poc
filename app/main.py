@@ -123,6 +123,9 @@ def save_policy_history(db: Session, policy: PolicyRecord) -> None:
         device_ids=policy.device_ids,
         max_risk_score=policy.max_risk_score,
         min_trust_score=policy.min_trust_score,
+        max_transaction_amount=policy.max_transaction_amount,
+        allowed_start_hour=policy.allowed_start_hour,
+        allowed_end_hour=policy.allowed_end_hour,
         enabled=policy.enabled,
         valid_from=policy.valid_from,
         expires_at=policy.expires_at,
@@ -654,10 +657,10 @@ def get_policy_history(
             ],
             "max_risk_score": item.max_risk_score,
             "min_trust_score": item.min_trust_score,
+            "max_transaction_amount": item.max_transaction_amount,
+            "allowed_start_hour": item.allowed_start_hour,
+            "allowed_end_hour": item.allowed_end_hour,
             "enabled": item.enabled,
-            "valid_from": item.valid_from,
-            "expires_at": item.expires_at,
-            "created_at": item.created_at,
         }
         for item in history
     ]

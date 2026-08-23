@@ -1039,3 +1039,59 @@ def test_admin_dynamic_business_rule_create_list_update_flow(client):
     assert updated["max_transaction_amount"] == 15000
     assert updated["allowed_start_hour"] == 9
     assert updated["allowed_end_hour"] == 17
+
+def test_policy_history_preserves_dynamic_business_rules(client):
+    ensure_setup(client)
+
+    create_response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-dynamic-rule",
+            "effect": "allow",
+            "priority": 5,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": 40,
+            "min_trust_score": 60,
+            "max_transaction_amount": 10000,
+            "allowed_start_hour": 8,
+            "allowed_end_hour": 18,
+            "enabled": True,
+        },
+    )
+
+    assert create_response.status_code == 200
+
+    policy_id = create_response.json()["id"]
+
+    update_response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "max_transaction_amount": 15000,
+            "allowed_start_hour": 9,
+            "allowed_end_hour": 17,
+        },
+    )
+
+    assert update_response.status_code == 200
+
+    history_response = client.get(
+        f"/admin/policies/{policy_id}/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert history_response.status_code == 200
+
+    history = history_response.json()
+
+    assert len(history) >= 1
+
+    previous = history[0]
+
+    assert previous["max_transaction_amount"] == 10000
+    assert previous["allowed_start_hour"] == 8
+    assert previous["allowed_end_hour"] == 18

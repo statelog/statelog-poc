@@ -227,7 +227,21 @@ class PolicyHistory(Base):
 
     max_risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     min_trust_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    
+    max_transaction_amount: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
 
+    allowed_start_hour: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    allowed_end_hour: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     valid_from: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
