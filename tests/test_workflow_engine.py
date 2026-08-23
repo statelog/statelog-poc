@@ -321,3 +321,19 @@ def test_access_flow_uses_policy_first_execution_mode(client):
     assert path[1] in ("policy_matched", "no_policy_match")
     assert path[2] == "risk_evaluated"
     assert path[-1] in ("final_allow", "final_deny")
+
+def test_admin_rejects_invalid_workflow_execution_mode(client):
+    ensure_setup(client)
+
+    response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "banana",
+        },
+    )
+
+    assert response.status_code == 422

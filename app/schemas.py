@@ -14,7 +14,7 @@ class WorkflowConfigUpdate(BaseModel):
     tenant_id: str
     include_risk_step: bool = True
     include_policy_step: bool = True
-    execution_mode: str = "risk_first"
+    execution_mode: Literal["risk_first", "policy_first"] = "risk_first"
 
 class ClientCreate(BaseModel):
     tenant_id: str
