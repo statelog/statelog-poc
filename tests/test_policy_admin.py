@@ -449,6 +449,61 @@ def test_admin_audit_logs_returns_request_logs(client):
     assert "risk_signals" in latest
     assert "trace_id" in latest
 
+def test_admin_audit_log_records_workflow_version(client):
+    ensure_setup(client)
+
+    create_config = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert create_config.status_code == 200
+
+    update_config = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": False,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert update_config.status_code == 200
+    assert update_config.json()["version"] == 2
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+    assert len(items) >= 1
+
+    trace_id = response.json()["trace_id"]
+
+    matching = [
+        item
+        for item in items
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    assert matching[0]["workflow_version"] == 2
+
 def test_admin_audit_logs_can_filter_denied_requests(client):
     ensure_setup(client)
 

@@ -971,6 +971,8 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
             right.owner_change_count += 1
             right.version += 1
 
+    workflow_config_record = db.get(WorkflowConfigRecord, tenant.id)
+    
     log = RequestLog(
         tenant_id=tenant.id,
         right_id=right.right_id,
@@ -994,6 +996,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         request_fingerprint=fingerprint,
         user_agent=user_agent,
         decision_version=settings.request_decision_version,
+        workflow_version=workflow_config_record.version if workflow_config_record is not None else 1,
     )
 
     tenant.usage_count += 1
@@ -1241,6 +1244,7 @@ def get_audit_logs(
             "policy_matched": log.policy_matched,
             "policy_name": log.policy_name,
             "policy_version": log.policy_version,
+            "workflow_version": log.workflow_version,
             "trace_id": log.trace_id,
             "created_at": log.created_at,
         }

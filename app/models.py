@@ -117,6 +117,7 @@ class RequestLog(Base):
     request_fingerprint: Mapped[str] = mapped_column(String(128), index=True)
     user_agent: Mapped[str] = mapped_column(String(512), default="")
     decision_version: Mapped[str] = mapped_column(String(32), default="v8")
+    workflow_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, index=True)
 
 
