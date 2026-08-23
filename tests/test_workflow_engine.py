@@ -337,3 +337,29 @@ def test_admin_rejects_invalid_workflow_execution_mode(client):
     )
 
     assert response.status_code == 422
+
+def test_risk_deny_cannot_be_overridden_by_policy_allow():
+    from app.workflow_engine import WorkflowConfig
+ 
+    engine = WorkflowEngine(
+        WorkflowConfig(
+            include_risk_step=True,
+            include_policy_step=True,
+            execution_mode="policy_first",
+        )
+    )
+
+    decision = engine.evaluate(
+        risk_allowed=False,
+        policy_matched=True,
+        policy_allowed=True,
+        final_allowed=False,
+    )
+
+    assert decision.decision_source == "risk"
+    assert decision.decision_path == (
+        "policy_checked",
+        "policy_matched",
+        "risk_evaluated",
+        "final_deny",
+    )
