@@ -95,11 +95,14 @@ def load_tenant_policies(db: Session, tenant_id: str) -> PolicyEngine:
                 for value in record.device_ids.split(",")
                 if value.strip()
             ),
-            max_risk_score=record.max_risk_score,
-            min_trust_score=record.min_trust_score,
-            version=record.version,
-            valid_from=record.valid_from,
-            expires_at=record.expires_at,
+        max_risk_score=record.max_risk_score,
+        min_trust_score=record.min_trust_score,
+        max_transaction_amount=record.max_transaction_amount,
+        allowed_start_hour=record.allowed_start_hour,
+        allowed_end_hour=record.allowed_end_hour,
+        version=record.version,
+        valid_from=record.valid_from,
+        expires_at=record.expires_at,
         )
         for record in records
     ]
@@ -866,7 +869,11 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         country_code=payload.country_code,
         risk_score=decision.risk_score,
         trust_score=decision.trust_score,
-        context={"now": utcnow_naive()},
+        context={
+            "now": utcnow_naive(),
+            "hour": utcnow_naive().hour,
+            "transaction_amount": payload.transaction_amount,
+        },
     )
 
     if policy_decision.matched and not policy_decision.allow:

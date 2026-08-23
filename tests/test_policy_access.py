@@ -2,7 +2,7 @@ from datetime import datetime
 from app.models import PolicyRecord, RequestLog
 from app.models import PolicyRecord
 
-from tests.test_smoke import HEADERS, ensure_setup, issue_token, access_request
+from tests.test_smoke import ADMIN_HEADERS, HEADERS, ensure_setup, issue_token, access_request
 
 
 def test_access_without_policy_uses_risk_decision(client):
@@ -1004,3 +1004,49 @@ def test_end_to_end_policy_risk_explainability_and_audit(client):
         assert log.policy_name == "e2e-deny-policy"
         assert log.policy_version == 4
         assert log.allowed is False
+
+def test_access_request_respects_transaction_amount_policy(client):
+    ensure_setup(client)
+
+    create = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "transaction-limit-policy",
+            "effect": "allow",
+            "priority": 1,
+            "request_types": ["ownership_transfer"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": None,
+            "min_trust_score": None,
+            "max_transaction_amount": 10000,
+            "allowed_start_hour": None,
+            "allowed_end_hour": None,
+            "enabled": True,
+        },
+    )
+
+    assert create.status_code == 200
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        country_code="EE",
+        transaction_amount=15000,
+        new_owner_id="user-456",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["policy_matched"] is False

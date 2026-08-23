@@ -48,6 +48,7 @@ class AccessRequest(BaseModel):
     device_id: str
     ip_address: str
     country_code: str = Field(default="EE", min_length=2, max_length=8)
+    transaction_amount: Optional[float] = None
     new_owner_id: Optional[str] = None
 
 
