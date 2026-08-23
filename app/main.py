@@ -443,6 +443,30 @@ def update_workflow_config(
         "include_policy_step": record.include_policy_step,
     }
 
+@app.get("/admin/workflow-config/{tenant_id}")
+def get_workflow_config(
+    tenant_id: str,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    if not db.get(Tenant, tenant_id):
+        raise HTTPException(status_code=404, detail="tenant_not_found")
+
+    record = db.get(WorkflowConfigRecord, tenant_id)
+
+    if record is None:
+        return {
+            "tenant_id": tenant_id,
+            "include_risk_step": True,
+            "include_policy_step": True,
+        }
+
+    return {
+        "tenant_id": record.tenant_id,
+        "include_risk_step": record.include_risk_step,
+        "include_policy_step": record.include_policy_step,
+    }
+
 @app.post("/admin/policies")
 def create_policy(
     payload: PolicyCreate,

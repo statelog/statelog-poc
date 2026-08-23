@@ -182,3 +182,31 @@ def test_access_flow_uses_tenant_workflow_config(client):
     assert "policy_checked" not in path
     assert "policy_matched" not in path
     assert "no_policy_match" not in path
+
+def test_admin_can_read_workflow_config(client):
+    ensure_setup(client)
+
+    update_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+        },
+    )
+
+    assert update_response.status_code == 200
+
+    get_response = client.get(
+        "/admin/workflow-config/tenant-demo",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert get_response.status_code == 200
+
+    body = get_response.json()
+
+    assert body["tenant_id"] == "tenant-demo"
+    assert body["include_risk_step"] is False
+    assert body["include_policy_step"] is True
