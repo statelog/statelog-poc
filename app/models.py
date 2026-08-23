@@ -31,6 +31,25 @@ class ClientCredential(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
+class WorkflowConfigRecord(Base):
+    __tablename__ = "workflow_configs"
+
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id"),
+        primary_key=True,
+    )
+    include_risk_step: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+    )
+    include_policy_step: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow_naive,
+    )
 
 class Device(Base):
     __tablename__ = "devices"

@@ -10,6 +10,10 @@ class TenantCreate(BaseModel):
     plan: str = "starter"
     monthly_quota: int = 1000
 
+class WorkflowConfigUpdate(BaseModel):
+    tenant_id: str
+    include_risk_step: bool = True
+    include_policy_step: bool = True
 
 class ClientCreate(BaseModel):
     tenant_id: str

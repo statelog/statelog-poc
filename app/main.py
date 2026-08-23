@@ -34,11 +34,11 @@ from .metrics import (
     RISK_SCORE_HISTOGRAM,
     metrics_response,
 )
-from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription, PolicyRecord, PolicyHistory
+from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription, PolicyRecord, PolicyHistory, WorkflowConfigRecord
 from .rate_limit import HybridRateLimiter
 from .replay_protection import HybridReplayStore
 from .risk_engine import RiskEngine
-from .workflow_engine import WorkflowEngine
+from .workflow_engine import WorkflowConfig, WorkflowEngine
 from .schemas import (
     AccessRequest,
     AccessRightCreate,
@@ -51,7 +51,8 @@ from .schemas import (
     WebhookCreate,
     PolicyCreate,
     PolicySimulationRequest,
-    PolicyUpdate
+    PolicyUpdate,
+    WorkflowConfigUpdate,
 )
 from .security import build_request_fingerprint, constant_time_equals, decode_access_token, encrypt_secret, get_active_signing_key, hash_secret, hash_with_pepper, issue_access_token
 from .services.auth_service import enforce_right_owner
@@ -410,6 +411,36 @@ def simulate_policy(
         "policy_name": simulation.policy_name,
         "policy_version": simulation.policy_version,
         "evaluated_policies": simulation.evaluated_policies,
+    }
+@app.put("/admin/workflow-config")
+def update_workflow_config(
+    payload: WorkflowConfigUpdate,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    if not db.get(Tenant, payload.tenant_id):
+        raise HTTPException(status_code=404, detail="tenant_not_found")
+
+    record = db.get(WorkflowConfigRecord, payload.tenant_id)
+
+    if record is None:
+        record = WorkflowConfigRecord(
+            tenant_id=payload.tenant_id,
+            include_risk_step=payload.include_risk_step,
+            include_policy_step=payload.include_policy_step,
+        )
+        db.add(record)
+    else:
+        record.include_risk_step = payload.include_risk_step
+        record.include_policy_step = payload.include_policy_step
+
+    db.commit()
+    db.refresh(record)
+
+    return {
+        "tenant_id": record.tenant_id,
+        "include_risk_step": record.include_risk_step,
+        "include_policy_step": record.include_policy_step,
     }
 
 @app.post("/admin/policies")
@@ -965,12 +996,25 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
     RISK_SCORE_HISTOGRAM.observe(decision.risk_score)
     LATENCY_HISTOGRAM.observe(time.perf_counter() - started)
     
-    workflow_decision = workflow_engine.evaluate(
+    workflow_config_record = db.get(WorkflowConfigRecord, tenant.id)
+
+    if workflow_config_record is not None:
+        request_workflow_engine = WorkflowEngine(
+            WorkflowConfig(
+                include_risk_step=workflow_config_record.include_risk_step,
+                include_policy_step=workflow_config_record.include_policy_step,
+            )
+        )
+    else:
+        request_workflow_engine = workflow_engine
+
+    workflow_decision = request_workflow_engine.evaluate(
         risk_allowed=decision.allow,
         policy_matched=policy_decision.matched,
         policy_allowed=policy_decision.allow,
         final_allowed=allowed,
     )
+
     response = {
         "allow": allowed,
         "reason": reason,
