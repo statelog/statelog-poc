@@ -970,3 +970,72 @@ def test_admin_policy_simulation_reports_no_match(client):
     assert body["policy_name"] is None
     assert body["policy_version"] is None
     assert body["evaluated_policies"] >= 1
+
+def test_admin_dynamic_business_rule_create_list_update_flow(client):
+    ensure_setup(client)
+
+    create_response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "dynamic-business-rule",
+            "effect": "allow",
+            "priority": 5,
+            "request_types": ["ownership_transfer"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": 40,
+            "min_trust_score": 60,
+            "max_transaction_amount": 10000,
+            "allowed_start_hour": 8,
+            "allowed_end_hour": 18,
+            "enabled": True,
+        },
+    )
+
+    assert create_response.status_code == 200
+
+    created = create_response.json()
+    policy_id = created["id"]
+
+    assert created["max_transaction_amount"] == 10000
+    assert created["allowed_start_hour"] == 8
+    assert created["allowed_end_hour"] == 18
+
+    list_response = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert list_response.status_code == 200
+
+    policies = list_response.json()
+    policy = next(
+        item
+        for item in policies
+        if item["id"] == policy_id
+    )
+
+    assert policy["max_transaction_amount"] == 10000
+    assert policy["allowed_start_hour"] == 8
+    assert policy["allowed_end_hour"] == 18
+
+    update_response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "max_transaction_amount": 15000,
+            "allowed_start_hour": 9,
+            "allowed_end_hour": 17,
+        },
+    )
+
+    assert update_response.status_code == 200
+
+    updated = update_response.json()
+
+    assert updated["max_transaction_amount"] == 15000
+    assert updated["allowed_start_hour"] == 9
+    assert updated["allowed_end_hour"] == 17

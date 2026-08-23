@@ -4,6 +4,7 @@ from .time_utils import utcnow_naive
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from .database import Base
 
@@ -162,6 +163,20 @@ class PolicyRecord(Base):
     )
 
     min_trust_score: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    max_transaction_amount: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    allowed_start_hour: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    allowed_end_hour: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
     )

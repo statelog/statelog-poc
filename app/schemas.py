@@ -91,6 +91,9 @@ class PolicyCreate(BaseModel):
 
     max_risk_score: Optional[int] = None
     min_trust_score: Optional[int] = None
+    max_transaction_amount: Optional[float] = None
+    allowed_start_hour: Optional[int] = None
+    allowed_end_hour: Optional[int] = None
     enabled: bool = True
     valid_from: Optional[datetime] = None
     expires_at: Optional[datetime] = None
@@ -105,6 +108,9 @@ class PolicyUpdate(BaseModel):
 
     max_risk_score: Optional[int] = None
     min_trust_score: Optional[int] = None
+    max_transaction_amount: Optional[float] = None
+    allowed_start_hour: Optional[int] = None
+    allowed_end_hour: Optional[int] = None
     enabled: Optional[bool] = None
     valid_from: Optional[datetime] = None
     expires_at: Optional[datetime] = None

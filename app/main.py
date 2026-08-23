@@ -423,6 +423,9 @@ def create_policy(
         device_ids=",".join(payload.device_ids),
         max_risk_score=payload.max_risk_score,
         min_trust_score=payload.min_trust_score,
+        max_transaction_amount=payload.max_transaction_amount,
+        allowed_start_hour=payload.allowed_start_hour,
+        allowed_end_hour=payload.allowed_end_hour,
         enabled=payload.enabled,
         valid_from=payload.valid_from,
         expires_at=payload.expires_at,
@@ -443,11 +446,11 @@ def create_policy(
         "device_ids": payload.device_ids,
         "max_risk_score": policy.max_risk_score,
         "min_trust_score": policy.min_trust_score,
+        "max_transaction_amount": policy.max_transaction_amount,
+        "allowed_start_hour": policy.allowed_start_hour,
+        "allowed_end_hour": policy.allowed_end_hour,
         "enabled": policy.enabled,
-        "valid_from": policy.valid_from,
-        "expires_at": policy.expires_at,
     }
-
 
 @app.patch("/admin/policies/{policy_id}")
 def update_policy(
@@ -483,6 +486,15 @@ def update_policy(
 
     if payload.min_trust_score is not None:
         policy.min_trust_score = payload.min_trust_score
+    
+    if payload.max_transaction_amount is not None:
+        policy.max_transaction_amount = payload.max_transaction_amount
+
+    if payload.allowed_start_hour is not None:
+        policy.allowed_start_hour = payload.allowed_start_hour
+
+    if payload.allowed_end_hour is not None:
+        policy.allowed_end_hour = payload.allowed_end_hour
 
     if payload.enabled is not None:
         policy.enabled = payload.enabled
@@ -521,10 +533,11 @@ def update_policy(
             if value.strip()
         ],
         "max_risk_score": policy.max_risk_score,
-        "max_risk_score": policy.max_risk_score,
+        "min_trust_score": policy.min_trust_score,
+        "max_transaction_amount": policy.max_transaction_amount,
+        "allowed_start_hour": policy.allowed_start_hour,
+        "allowed_end_hour": policy.allowed_end_hour,
         "enabled": policy.enabled,
-        "valid_from": policy.valid_from,
-        "expires_at": policy.expires_at,
     }
 
 @app.get("/admin/policies")
@@ -564,7 +577,10 @@ def list_policies(
                 if value.strip()
             ],
             "max_risk_score": policy.max_risk_score,
-            "max_risk_score": policy.max_risk_score,
+            "min_trust_score": policy.min_trust_score,
+            "max_transaction_amount": policy.max_transaction_amount,
+            "allowed_start_hour": policy.allowed_start_hour,
+            "allowed_end_hour": policy.allowed_end_hour,
             "enabled": policy.enabled,
             "valid_from": policy.valid_from,
             "expires_at": policy.expires_at,
