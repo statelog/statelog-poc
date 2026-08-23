@@ -16,6 +16,7 @@ class Policy:
     device_ids: tuple[str, ...] = ()
     max_risk_score: int | None = None
     min_trust_score: int | None = None
+    max_transaction_amount: float | None = None
     valid_from: datetime | None = None
     expires_at: datetime | None = None
 
@@ -73,6 +74,7 @@ class PolicyEngine:
                 country_code=country_code,
                 risk_score=risk_score,
                 trust_score=trust_score,
+                context=context,
             ):
                 continue
 
@@ -138,6 +140,7 @@ class PolicyEngine:
         country_code: str,
         risk_score: int,
         trust_score: int,
+        context: dict[str, Any],
     ) -> bool:
         if policy.request_types and request_type not in policy.request_types:
             return False
@@ -150,7 +153,17 @@ class PolicyEngine:
 
         if policy.max_risk_score is not None and risk_score > policy.max_risk_score:
             return False
+
         if policy.min_trust_score is not None and trust_score < policy.min_trust_score:
             return False
+
+        if policy.max_transaction_amount is not None:
+            transaction_amount = context.get("transaction_amount")
+
+            if transaction_amount is None:
+                return False
+
+            if transaction_amount > policy.max_transaction_amount:
+                return False
 
         return True

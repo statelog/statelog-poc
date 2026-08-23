@@ -334,3 +334,65 @@ def test_policy_simulation_is_repeatable_and_side_effect_free():
     assert first == second
     assert len(engine.policies) == 1
     assert engine.policies[0].name == "repeatable-deny"
+
+def test_policy_max_transaction_amount_matches_context():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="transaction-limit",
+                effect="deny",
+                priority=1,
+                request_types=("access",),
+                max_transaction_amount=10000,
+            )
+        ]
+    )
+
+    below_limit = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"transaction_amount": 5000},
+    )
+
+    above_limit = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"transaction_amount": 15000},
+    )
+
+    assert below_limit.matched is True
+    assert below_limit.allow is False
+
+    assert above_limit.matched is False
+    assert above_limit.reason == "no_policy_match"
+
+def test_policy_max_transaction_amount_requires_context_value():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="transaction-limit",
+                effect="deny",
+                priority=1,
+                request_types=("access",),
+                max_transaction_amount=10000,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={},
+    )
+
+    assert decision.matched is False
+    assert decision.reason == "no_policy_match"
