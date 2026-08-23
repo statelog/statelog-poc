@@ -38,6 +38,7 @@ from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestL
 from .rate_limit import HybridRateLimiter
 from .replay_protection import HybridReplayStore
 from .risk_engine import RiskEngine
+from .workflow_engine import WorkflowEngine
 from .schemas import (
     AccessRequest,
     AccessRightCreate,
@@ -64,6 +65,7 @@ logger = logging.getLogger(__name__)
 
 templates = Jinja2Templates(directory="app/templates")
 risk_engine = RiskEngine()
+workflow_engine = WorkflowEngine()
 policy_engine = PolicyEngine()
 decision_cache: dict[str, tuple[float, dict]] = {}
 
@@ -962,7 +964,13 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
 
     RISK_SCORE_HISTOGRAM.observe(decision.risk_score)
     LATENCY_HISTOGRAM.observe(time.perf_counter() - started)
-
+    
+    workflow_decision = workflow_engine.evaluate(
+        risk_allowed=decision.allow,
+        policy_matched=policy_decision.matched,
+        policy_allowed=policy_decision.allow,
+        final_allowed=allowed,
+    )
     response = {
         "allow": allowed,
         "reason": reason,
@@ -990,35 +998,14 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
                 "version": policy_decision.policy_version,
                 "reason": policy_decision.reason,
             },
+
     "final": {
-    "allow": allowed,
-    "reason": reason,
-    "decision_source": (
-        "risk"
-        if not decision.allow
-        else (
-            "policy"
-            if policy_decision.matched
-            else "risk"
-        )
-    ),
-    "decision_path": (
-        [
-            "risk_evaluated",
-            "policy_checked",
-            (
-                "policy_matched"
-                if policy_decision.matched
-                else "no_policy_match"
-            ),
-            (
-                "final_allow"
-                if allowed
-                else "final_deny"
-            ),
-        ]
-    ),
-},
+        "allow": allowed,
+        "reason": reason,
+        "decision_source": workflow_decision.decision_source,
+        "decision_path": list(workflow_decision.decision_path),
+    },
+  
         },
         "trace_id": trace,
         "decision_version": settings.request_decision_version,
