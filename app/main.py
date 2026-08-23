@@ -428,11 +428,13 @@ def update_workflow_config(
             tenant_id=payload.tenant_id,
             include_risk_step=payload.include_risk_step,
             include_policy_step=payload.include_policy_step,
+            execution_mode=payload.execution_mode,
         )
         db.add(record)
     else:
         record.include_risk_step = payload.include_risk_step
         record.include_policy_step = payload.include_policy_step
+        execution_mode=payload.execution_mode,
 
     db.commit()
     db.refresh(record)
@@ -441,6 +443,7 @@ def update_workflow_config(
         "tenant_id": record.tenant_id,
         "include_risk_step": record.include_risk_step,
         "include_policy_step": record.include_policy_step,
+        "execution_mode": record.execution_mode,
     }
 
 @app.get("/admin/workflow-config/{tenant_id}")
@@ -459,6 +462,7 @@ def get_workflow_config(
             "tenant_id": tenant_id,
             "include_risk_step": True,
             "include_policy_step": True,
+            "execution_mode": "risk_first",
         }
 
     return {
@@ -1027,6 +1031,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
             WorkflowConfig(
                 include_risk_step=workflow_config_record.include_risk_step,
                 include_policy_step=workflow_config_record.include_policy_step,
+                execution_mode=workflow_config_record.execution_mode,
             )
         )
     else:

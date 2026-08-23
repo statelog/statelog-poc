@@ -259,3 +259,65 @@ def test_admin_cannot_update_workflow_config_for_unknown_tenant(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "tenant_not_found"
+
+def test_workflow_config_defaults_to_risk_first():
+    from app.workflow_engine import WorkflowConfig
+
+    config = WorkflowConfig()
+
+    assert config.execution_mode == "risk_first"
+
+def test_workflow_policy_first_changes_decision_path_order():
+    from app.workflow_engine import WorkflowConfig
+
+    engine = WorkflowEngine(
+        WorkflowConfig(
+            include_risk_step=True,
+            include_policy_step=True,
+            execution_mode="policy_first",
+        )
+    )
+
+    decision = engine.evaluate(
+        risk_allowed=True,
+        policy_matched=True,
+        policy_allowed=True,
+        final_allowed=True,
+    )
+
+    assert decision.decision_path == (
+        "policy_checked",
+        "policy_matched",
+        "risk_evaluated",
+        "final_allow",
+    )
+
+def test_access_flow_uses_policy_first_execution_mode(client):
+    ensure_setup(client)
+
+    config_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert config_response.status_code == 200
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+    path = body["explanation"]["final"]["decision_path"]
+
+    assert path[0] == "policy_checked"
+    assert path[1] in ("policy_matched", "no_policy_match")
+    assert path[2] == "risk_evaluated"
+    assert path[-1] in ("final_allow", "final_deny")

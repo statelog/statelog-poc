@@ -12,6 +12,7 @@ class WorkflowDecision:
 class WorkflowConfig:
     include_risk_step: bool = True
     include_policy_step: bool = True
+    execution_mode: str = "risk_first"
 
 class WorkflowEngine:
     def __init__(self, config: WorkflowConfig | None = None) -> None:
@@ -33,16 +34,29 @@ class WorkflowEngine:
 
         path: list[str] = []
 
-        if self.config.include_risk_step:
-            path.append("risk_evaluated")
+        if self.config.execution_mode == "policy_first":
+            if self.config.include_policy_step:
+                path.append("policy_checked")
+                path.append(
+                    "policy_matched"
+                    if policy_matched
+                    else "no_policy_match"
+                )
 
-        if self.config.include_policy_step:
-            path.append("policy_checked")
-            path.append(
-                "policy_matched"
-                if policy_matched
-                else "no_policy_match"
-            )
+            if self.config.include_risk_step:
+                path.append("risk_evaluated")
+
+        else:
+            if self.config.include_risk_step:
+                path.append("risk_evaluated")
+
+            if self.config.include_policy_step:
+                path.append("policy_checked")
+                path.append(
+                    "policy_matched"
+                    if policy_matched
+                    else "no_policy_match"
+                )
 
         path.append(
             "final_allow"

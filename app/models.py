@@ -46,6 +46,11 @@ class WorkflowConfigRecord(Base):
         Boolean,
         default=True,
     )
+    execution_mode: Mapped[str] = mapped_column(
+        String(32),
+        default="risk_first",
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=utcnow_naive,
