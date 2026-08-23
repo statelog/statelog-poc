@@ -1090,6 +1090,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         "reason": reason,
         "decision_source": workflow_decision.decision_source,
         "decision_path": list(workflow_decision.decision_path),
+        "workflow_version": workflow_config_record.version if workflow_config_record is not None else 1,
     },
   
         },

@@ -448,3 +448,15 @@ def test_default_workflow_config_has_version_one(client):
 
     assert body["tenant_id"] == "tenant-demo"
     assert body["version"] == 1
+
+def test_access_response_explanation_matches_workflow_version(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["workflow_version"] == body["explanation"]["final"]["workflow_version"]
