@@ -138,6 +138,7 @@ def test_admin_can_create_and_update_workflow_config(client):
     assert created["include_risk_step"] is False
     assert created["include_policy_step"] is True
     assert created["execution_mode"] == "policy_first"
+    assert created["version"] == 1
 
     update_response = client.put(
         "/admin/workflow-config",
@@ -157,6 +158,18 @@ def test_admin_can_create_and_update_workflow_config(client):
     assert updated["include_risk_step"] is True
     assert updated["include_policy_step"] is False
     assert updated["execution_mode"] == "risk_first"
+    assert updated["version"] == 2
+
+    get_response = client.get(
+        "/admin/workflow-config/tenant-demo",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert get_response.status_code == 200
+
+    body = get_response.json()
+
+    assert body["version"] == 2
 
 def test_access_flow_uses_tenant_workflow_config(client):
     ensure_setup(client)

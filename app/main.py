@@ -435,6 +435,7 @@ def update_workflow_config(
         record.include_risk_step = payload.include_risk_step
         record.include_policy_step = payload.include_policy_step
         record.execution_mode = payload.execution_mode
+        record.version += 1
 
     db.commit()
     db.refresh(record)
@@ -444,6 +445,7 @@ def update_workflow_config(
         "include_risk_step": record.include_risk_step,
         "include_policy_step": record.include_policy_step,
         "execution_mode": record.execution_mode,
+        "version": record.version,
     }
 
 @app.get("/admin/workflow-config/{tenant_id}")
@@ -470,6 +472,7 @@ def get_workflow_config(
         "include_risk_step": record.include_risk_step,
         "include_policy_step": record.include_policy_step,
         "execution_mode": record.execution_mode,
+        "version": record.version,
     }
 
 @app.post("/admin/policies")

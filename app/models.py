@@ -50,6 +50,10 @@ class WorkflowConfigRecord(Base):
         String(32),
         default="risk_first",
     )
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
