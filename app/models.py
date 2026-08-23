@@ -101,12 +101,15 @@ class RequestLog(Base):
     ip_hash: Mapped[str] = mapped_column(String(128), index=True)
     country_code: Mapped[str] = mapped_column(String(8), default="ZZ")
     request_type: Mapped[str] = mapped_column(String(50))
+    transaction_amount: Mapped[float | None] = mapped_column(nullable=True)
+    new_owner_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     allowed: Mapped[bool] = mapped_column(Boolean)
     risk_score: Mapped[int] = mapped_column(Integer, default=0)
     reason: Mapped[str] = mapped_column(String(255))
     risk_signals: Mapped[str] = mapped_column(Text, default="")
     policy_matched: Mapped[bool] = mapped_column(Boolean, default=False)
     policy_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    policy_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     policy_version: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,

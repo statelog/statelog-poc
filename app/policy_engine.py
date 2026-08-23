@@ -9,6 +9,7 @@ from typing import Any, Iterable
 class Policy:
     name: str
     effect: str
+    policy_id: int | None = None
     priority: int = 100
     version: int = 1
     request_types: tuple[str, ...] = ()
@@ -29,6 +30,7 @@ class PolicyDecision:
     reason: str
     policy_name: str | None = None
     policy_version: int | None = None
+    policy_id: int | None = None
 
 @dataclass(frozen=True)
 class PolicySimulation:
@@ -89,6 +91,7 @@ class PolicyEngine:
                     reason=f"policy_deny:{policy.name}",
                     policy_name=policy.name,
                     policy_version=policy.version,
+                    policy_id=policy.policy_id,
                 )
 
             if effect == "allow":
@@ -98,6 +101,7 @@ class PolicyEngine:
                     reason=f"policy_allow:{policy.name}",
                     policy_name=policy.name,
                     policy_version=policy.version,
+                    policy_id=policy.policy_id,
                 )
 
         return PolicyDecision(

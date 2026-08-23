@@ -1154,3 +1154,102 @@ def test_policy_history_preserves_dynamic_business_rules(client):
     assert previous["max_transaction_amount"] == 10000
     assert previous["allowed_start_hour"] == 8
     assert previous["allowed_end_hour"] == 18
+
+def test_audit_log_preserves_new_owner_id(client):
+    ensure_setup(client)
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        new_owner_id="user-456",
+    )
+
+    assert response.status_code == 200
+
+    trace_id = response.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    matching = [
+        item
+        for item in items
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    assert matching[0]["new_owner_id"] == "user-456"
+
+def test_audit_log_records_policy_id_and_version(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "audit-policy-identity",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": None,
+            "min_trust_score": None,
+            "max_transaction_amount": None,
+            "allowed_start_hour": None,
+            "allowed_end_hour": None,
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+
+    policy = created.json()
+    policy_id = policy["id"]
+    policy_version = policy["version"]
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is False
+
+    trace_id = response.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "audit-policy-identity",
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    matching = [
+        item
+        for item in items
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    assert matching[0]["policy_id"] == policy_id
+    assert matching[0]["policy_version"] == policy_version
