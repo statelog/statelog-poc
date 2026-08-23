@@ -940,12 +940,17 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         },
     )
 
-    if policy_decision.matched and not policy_decision.allow:
-        allowed = False
-        reason = policy_decision.reason
-    elif policy_decision.matched and decision.allow:
-        allowed = True
-        reason = policy_decision.reason
+    allowed = workflow_engine.resolve_allowed(
+        risk_allowed=decision.allow,
+        policy_matched=policy_decision.matched,
+        policy_allowed=policy_decision.allow,
+    )
+
+    if policy_decision.matched:
+        if not decision.allow:
+            reason = decision.reason
+        else:
+            reason = policy_decision.reason
 
     if payload.request_type == "ownership_transfer":
         if not payload.new_owner_id:

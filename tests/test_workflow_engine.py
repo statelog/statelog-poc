@@ -389,3 +389,28 @@ def test_policy_deny_cannot_be_overridden_by_risk_allow():
         "policy_matched",
         "final_deny",
     )
+
+def test_workflow_resolve_allowed_enforces_deny_wins():
+    assert WorkflowEngine.resolve_allowed(
+        risk_allowed=True,
+        policy_matched=False,
+        policy_allowed=None,
+    ) is True
+
+    assert WorkflowEngine.resolve_allowed(
+        risk_allowed=True,
+        policy_matched=True,
+        policy_allowed=True,
+    ) is True
+
+    assert WorkflowEngine.resolve_allowed(
+        risk_allowed=False,
+        policy_matched=True,
+        policy_allowed=True,
+    ) is False
+
+    assert WorkflowEngine.resolve_allowed(
+        risk_allowed=True,
+        policy_matched=True,
+        policy_allowed=False,
+    ) is False

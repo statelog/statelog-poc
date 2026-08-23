@@ -17,6 +17,21 @@ class WorkflowConfig:
 class WorkflowEngine:
     def __init__(self, config: WorkflowConfig | None = None) -> None:
         self.config = config or WorkflowConfig()
+
+    @staticmethod
+    def resolve_allowed(
+        *,
+        risk_allowed: bool,
+        policy_matched: bool,
+        policy_allowed: bool | None,
+    ) -> bool:
+        if not risk_allowed:
+            return False
+
+        if policy_matched and policy_allowed is False:
+            return False
+
+        return True
     def evaluate(
         self,
         *,
