@@ -17,6 +17,8 @@ class Policy:
     max_risk_score: int | None = None
     min_trust_score: int | None = None
     max_transaction_amount: float | None = None
+    allowed_start_hour: int | None = None
+    allowed_end_hour: int | None = None
     valid_from: datetime | None = None
     expires_at: datetime | None = None
 
@@ -164,6 +166,27 @@ class PolicyEngine:
                 return False
 
             if transaction_amount > policy.max_transaction_amount:
+                return False
+
+        if (
+            policy.allowed_start_hour is not None
+            or policy.allowed_end_hour is not None
+        ):
+            hour = context.get("hour")
+
+            if hour is None:
+                return False
+
+            if (
+                policy.allowed_start_hour is not None
+                and hour < policy.allowed_start_hour
+            ):
+                return False
+
+            if (
+                policy.allowed_end_hour is not None
+                and hour >= policy.allowed_end_hour
+            ):
                 return False
 
         return True

@@ -396,3 +396,116 @@ def test_policy_max_transaction_amount_requires_context_value():
 
     assert decision.matched is False
     assert decision.reason == "no_policy_match"
+
+def test_policy_allowed_business_hours_matches_context():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="business-hours-only",
+                effect="deny",
+                priority=1,
+                request_types=("access",),
+                allowed_start_hour=8,
+                allowed_end_hour=18,
+            )
+        ]
+    )
+
+    during_hours = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 12},
+    )
+
+    outside_hours = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 20},
+    )
+
+    assert during_hours.matched is True
+    assert during_hours.allow is False
+
+    assert outside_hours.matched is False
+    assert outside_hours.reason == "no_policy_match"
+
+def test_policy_business_hours_requires_context_hour():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="business-hours-only",
+                effect="deny",
+                priority=1,
+                request_types=("access",),
+                allowed_start_hour=8,
+                allowed_end_hour=18,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={},
+    )
+
+    assert decision.matched is False
+    assert decision.reason == "no_policy_match"
+
+def test_policy_combines_dynamic_business_rules():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="high-value-business-hours",
+                effect="allow",
+                priority=1,
+                request_types=("ownership_transfer",),
+                countries=("EE",),
+                max_risk_score=40,
+                min_trust_score=60,
+                max_transaction_amount=10000,
+                allowed_start_hour=8,
+                allowed_end_hour=18,
+            )
+        ]
+    )
+
+    valid_request = engine.evaluate(
+        request_type="ownership_transfer",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=25,
+        trust_score=75,
+        context={
+            "transaction_amount": 7500,
+            "hour": 14,
+        },
+    )
+
+    invalid_request = engine.evaluate(
+        request_type="ownership_transfer",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=25,
+        trust_score=75,
+        context={
+            "transaction_amount": 7500,
+            "hour": 21,
+        },
+    )
+
+    assert valid_request.matched is True
+    assert valid_request.allow is True
+    assert valid_request.policy_name == "high-value-business-hours"
+
+    assert invalid_request.matched is False
+    assert invalid_request.reason == "no_policy_match"
