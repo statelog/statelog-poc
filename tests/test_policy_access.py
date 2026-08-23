@@ -278,6 +278,8 @@ def test_risk_deny_cannot_be_overridden_by_allow_policy(client):
 
     # Deny wins: policy allow cannot override RiskEngine deny.
     assert body["allow"] is False
+    assert body["explanation"]["final"]["allow"] is False
+    assert body["explanation"]["final"]["decision_source"] == "risk"
 
 def test_future_policy_does_not_apply(client):
     ensure_setup(client)
