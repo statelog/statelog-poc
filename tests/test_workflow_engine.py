@@ -210,3 +210,36 @@ def test_admin_can_read_workflow_config(client):
     assert body["tenant_id"] == "tenant-demo"
     assert body["include_risk_step"] is False
     assert body["include_policy_step"] is True
+
+def test_admin_reads_default_workflow_config_when_none_exists(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        record = db.get(WorkflowConfigRecord, "tenant-demo")
+        if record is not None:
+            db.delete(record)
+            db.commit()
+
+    response = client.get(
+        "/admin/workflow-config/tenant-demo",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["tenant_id"] == "tenant-demo"
+    assert body["include_risk_step"] is True
+    assert body["include_policy_step"] is True
+
+def test_admin_workflow_config_unknown_tenant_returns_404(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/workflow-config/tenant-that-does-not-exist",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "tenant_not_found"
