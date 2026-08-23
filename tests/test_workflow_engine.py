@@ -243,3 +243,19 @@ def test_admin_workflow_config_unknown_tenant_returns_404(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "tenant_not_found"
+
+def test_admin_cannot_update_workflow_config_for_unknown_tenant(client):
+    ensure_setup(client)
+
+    response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-that-does-not-exist",
+            "include_risk_step": False,
+            "include_policy_step": False,
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "tenant_not_found"
