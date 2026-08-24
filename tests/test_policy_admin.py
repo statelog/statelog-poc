@@ -1512,3 +1512,79 @@ def test_replay_re_evaluates_original_decision(client):
 
     assert body["comparison"]["decision_match"] is True
     assert body["comparison"]["risk_score_match"] is True
+
+def test_replay_ignores_future_request_logs(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    log_id = matching[0]["id"]
+
+    replay_before = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay_before.status_code == 200
+
+    before = replay_before.json()
+
+    for index in range(5):
+        future_token = issue_token(client).json()["token"]
+
+        future = access_request(
+            client,
+            future_token,
+            ip_address=f"10.99.0.{index + 1}",
+            country_code="FI",
+        )
+
+        assert future.status_code == 200
+
+    replay_after = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay_after.status_code == 200
+
+    after = replay_after.json()
+
+    assert after["replayed"]["allow"] == before["replayed"]["allow"]
+    assert after["replayed"]["risk_score"] == before["replayed"]["risk_score"]
+    assert after["replayed"]["risk_signals"] == before["replayed"]["risk_signals"]
+
+    assert after["comparison"]["decision_match"] is True
+    assert after["comparison"]["risk_score_match"] is True
