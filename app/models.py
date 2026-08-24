@@ -60,6 +60,23 @@ class WorkflowConfigRecord(Base):
         default=utcnow_naive,
     )
 
+class WorkflowConfigHistory(Base):
+    __tablename__ = "workflow_config_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id"),
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    include_risk_step: Mapped[bool] = mapped_column(Boolean)
+    include_policy_step: Mapped[bool] = mapped_column(Boolean)
+    execution_mode: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow_naive,
+    )
+
 class Device(Base):
     __tablename__ = "devices"
     __table_args__ = (UniqueConstraint("tenant_id", "device_id", name="uq_device_per_tenant"),)

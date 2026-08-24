@@ -460,3 +460,154 @@ def test_access_response_explanation_matches_workflow_version(client):
     body = response.json()
 
     assert body["workflow_version"] == body["explanation"]["final"]["workflow_version"]
+
+def test_workflow_config_update_preserves_previous_version_history(client):
+    ensure_setup(client)
+
+    create_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert create_response.status_code == 200
+    assert create_response.json()["version"] == 1
+
+    update_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["version"] == 2
+
+    from app.database import SessionLocal
+    from app.models import WorkflowConfigHistory
+
+    with SessionLocal() as db:
+        history = (
+            db.query(WorkflowConfigHistory)
+            .filter_by(tenant_id="tenant-demo")
+            .order_by(WorkflowConfigHistory.version.desc())
+            .first()
+        )
+
+        assert history is not None
+        assert history.version == 1
+        assert history.include_risk_step is True
+        assert history.include_policy_step is True
+        assert history.execution_mode == "risk_first"
+
+def test_workflow_config_history_endpoint_returns_previous_version(client):
+    ensure_setup(client)
+
+    create_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert create_response.status_code == 200
+    assert create_response.json()["version"] == 1
+
+    update_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["version"] == 2
+
+    history_response = client.get(
+        "/admin/workflow-config/tenant-demo/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert history_response.status_code == 200
+
+    history = history_response.json()
+
+    assert len(history) == 1
+    assert history[0]["tenant_id"] == "tenant-demo"
+    assert history[0]["version"] == 1
+    assert history[0]["include_risk_step"] is True
+    assert history[0]["include_policy_step"] is True
+    assert history[0]["execution_mode"] == "risk_first"
+
+def test_load_workflow_config_version_restores_history_and_active_version(client):
+    ensure_setup(client)
+
+    create_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert create_response.status_code == 200
+    assert create_response.json()["version"] == 1
+
+    update_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["version"] == 2
+
+    from app.database import SessionLocal
+    from app.main import load_workflow_config_version
+
+    with SessionLocal() as db:
+        version_1 = load_workflow_config_version(
+            db,
+            "tenant-demo",
+            1,
+        )
+        version_2 = load_workflow_config_version(
+            db,
+            "tenant-demo",
+            2,
+        )
+
+    assert version_1 is not None
+    assert version_1.include_risk_step is True
+    assert version_1.include_policy_step is True
+    assert version_1.execution_mode == "risk_first"
+
+    assert version_2 is not None
+    assert version_2.include_risk_step is False
+    assert version_2.include_policy_step is True
+    assert version_2.execution_mode == "policy_first"
