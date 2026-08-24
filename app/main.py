@@ -833,6 +833,7 @@ def delete_policy(
     if not policy:
         raise HTTPException(status_code=404, detail="policy_not_found")
 
+    save_policy_history(db, policy)  
     db.delete(policy)
     db.commit()
 

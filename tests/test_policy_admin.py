@@ -1656,3 +1656,88 @@ def test_replay_re_evaluates_ownership_transfer(client):
 
     assert body["comparison"]["decision_match"] is True
     assert body["comparison"]["risk_score_match"] is True
+
+def test_replay_survives_policy_deletion(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    policy = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "deleted-replay-policy",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+        },
+    )
+    assert policy.status_code == 200
+
+    policy_id = policy.json()["id"]
+    policy_version = policy.json()["version"]
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    assert original.json()["allow"] is False
+
+    trace_id = original.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    log_id = matching[0]["id"]
+
+    deleted = client.delete(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["original"]["allow"] is False
+    assert body["policy"] is not None
+    assert body["policy"]["policy_id"] == policy_id
+    assert body["policy"]["version"] == policy_version
+    assert body["policy"]["name"] == "deleted-replay-policy"
+
+    assert body["replayed"]["allow"] is False
+    assert body["comparison"]["decision_match"] is True
+    assert body["comparison"]["risk_score_match"] is True
