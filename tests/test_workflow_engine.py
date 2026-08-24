@@ -611,3 +611,83 @@ def test_load_workflow_config_version_restores_history_and_active_version(client
     assert version_2.include_risk_step is False
     assert version_2.include_policy_step is True
     assert version_2.execution_mode == "policy_first"
+
+def test_workflow_config_multiple_versions_remain_replayable(client):
+    ensure_setup(client)
+
+    version_1_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert version_1_response.status_code == 200
+    assert version_1_response.json()["version"] == 1
+
+    version_2_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert version_2_response.status_code == 200
+    assert version_2_response.json()["version"] == 2
+
+    version_3_response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": False,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert version_3_response.status_code == 200
+    assert version_3_response.json()["version"] == 3
+
+    from app.database import SessionLocal
+    from app.main import load_workflow_config_version
+
+    with SessionLocal() as db:
+        version_1 = load_workflow_config_version(
+            db,
+            "tenant-demo",
+            1,
+        )
+        version_2 = load_workflow_config_version(
+            db,
+            "tenant-demo",
+            2,
+        )
+        version_3 = load_workflow_config_version(
+            db,
+            "tenant-demo",
+            3,
+        )
+
+    assert version_1 is not None
+    assert version_1.include_risk_step is True
+    assert version_1.include_policy_step is True
+    assert version_1.execution_mode == "risk_first"
+
+    assert version_2 is not None
+    assert version_2.include_risk_step is False
+    assert version_2.include_policy_step is True
+    assert version_2.execution_mode == "policy_first"
+
+    assert version_3 is not None
+    assert version_3.include_risk_step is True
+    assert version_3.include_policy_step is False
+    assert version_3.execution_mode == "risk_first"
