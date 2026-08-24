@@ -34,11 +34,12 @@ class RiskEngine:
         ip_address: str,
         country_code: str,
         historical_logs: Iterable[RequestLog],
+        now: datetime | None = None,
     ) -> RiskDecision:
         score = 0
         reasons: list[str] = []
         logs = sorted(list(historical_logs), key=lambda item: item.created_at)
-        now = utcnow_naive()
+        now = now or utcnow_naive()
 
         recent_failures = [l for l in logs if (now - l.created_at) <= timedelta(minutes=15) and not l.allowed]
         if len(recent_failures) >= 3:

@@ -1253,3 +1253,262 @@ def test_audit_log_records_policy_id_and_version(client):
     assert len(matching) == 1
     assert matching[0]["policy_id"] == policy_id
     assert matching[0]["policy_version"] == policy_version
+
+def test_load_policy_version_restores_history_and_active_version(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "replay-version-policy",
+            "effect": "deny",
+            "priority": 10,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": None,
+            "min_trust_score": None,
+            "max_transaction_amount": 10000,
+            "allowed_start_hour": None,
+            "allowed_end_hour": None,
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+    assert created.json()["version"] == 1
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "priority": 5,
+            "max_transaction_amount": 15000,
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+    from app.database import SessionLocal
+    from app.main import load_policy_version
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(
+            db,
+            "tenant-demo",
+            policy_id,
+            1,
+        )
+        version_2 = load_policy_version(
+            db,
+            "tenant-demo",
+            policy_id,
+            2,
+        )
+
+    assert version_1 is not None
+    assert version_1.policy_id == policy_id
+    assert version_1.version == 1
+    assert version_1.priority == 10
+    assert version_1.max_transaction_amount == 10000
+
+    assert version_2 is not None
+    assert version_2.policy_id == policy_id
+    assert version_2.version == 2
+    assert version_2.priority == 5
+    assert version_2.max_transaction_amount == 15000
+
+def test_replay_restores_historical_policy_and_workflow_versions(client):
+    ensure_setup(client)
+
+    workflow_v1 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert workflow_v1.status_code == 200
+    assert workflow_v1.json()["version"] == 1
+
+    policy_v1 = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "replay-history-policy",
+            "effect": "deny",
+            "priority": 10,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": None,
+            "min_trust_score": None,
+            "max_transaction_amount": None,
+            "allowed_start_hour": None,
+            "allowed_end_hour": None,
+            "enabled": True,
+        },
+    )
+
+    assert policy_v1.status_code == 200
+
+    policy_id = policy_v1.json()["id"]
+    assert policy_v1.json()["version"] == 1
+
+    token = issue_token(client).json()["token"]
+    decision = access_request(client, token)
+
+    assert decision.status_code == 200
+    assert decision.json()["allow"] is False
+
+    trace_id = decision.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "replay-history-policy",
+        },
+    )
+
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    log_id = matching[0]["id"]
+
+    workflow_v2 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert workflow_v2.status_code == 200
+    assert workflow_v2.json()["version"] == 2
+
+    policy_v2 = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "priority": 5,
+            "max_transaction_amount": 15000,
+        },
+    )
+
+    assert policy_v2.status_code == 200
+    assert policy_v2.json()["version"] == 2
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["trace_id"] == trace_id
+    assert body["workflow"]["version"] == 1
+    assert body["workflow"]["include_risk_step"] is True
+    assert body["workflow"]["include_policy_step"] is True
+    assert body["workflow"]["execution_mode"] == "risk_first"
+
+    assert body["policy"]["policy_id"] == policy_id
+    assert body["policy"]["version"] == 1
+    assert body["policy"]["priority"] == 10
+    assert body["policy"]["max_transaction_amount"] is None
+
+def test_replay_re_evaluates_original_decision(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    policy = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "replay-evaluation-policy",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+        },
+    )
+    assert policy.status_code == 200
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    assert original.json()["allow"] is False
+
+    trace_id = original.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    log_id = matching[0]["id"]
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["original"]["allow"] is False
+
+    assert "replayed" in body
+    assert body["replayed"]["allow"] is False
+    assert body["replayed"]["risk_score"] == body["original"]["risk_score"]
+    assert body["replayed"]["policy_matched"] is True
+
+    assert body["comparison"]["decision_match"] is True
+    assert body["comparison"]["risk_score_match"] is True

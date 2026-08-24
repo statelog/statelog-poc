@@ -34,7 +34,7 @@ from .metrics import (
     RISK_SCORE_HISTOGRAM,
     metrics_response,
 )
-from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription, PolicyRecord, PolicyHistory, WorkflowConfigRecord
+from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription, PolicyRecord, PolicyHistory, WorkflowConfigRecord, WorkflowConfigHistory
 from .rate_limit import HybridRateLimiter
 from .replay_protection import HybridReplayStore
 from .risk_engine import RiskEngine
@@ -136,6 +136,135 @@ def save_policy_history(db: Session, policy: PolicyRecord) -> None:
     )
     db.add(history)
 
+def save_workflow_config_history(
+    db: Session,
+    record: WorkflowConfigRecord,
+) -> None:
+    history = WorkflowConfigHistory(
+        tenant_id=record.tenant_id,
+        version=record.version,
+        include_risk_step=record.include_risk_step,
+        include_policy_step=record.include_policy_step,
+        execution_mode=record.execution_mode,
+    )
+    db.add(history)
+def load_workflow_config_version(
+    db: Session,
+    tenant_id: str,
+    version: int,
+) -> WorkflowConfig | None:
+    record = db.get(WorkflowConfigRecord, tenant_id)
+
+    if record is not None and record.version == version:
+        return WorkflowConfig(
+            include_risk_step=record.include_risk_step,
+            include_policy_step=record.include_policy_step,
+            execution_mode=record.execution_mode,
+        )
+
+    history = (
+        db.query(WorkflowConfigHistory)
+        .filter_by(
+            tenant_id=tenant_id,
+            version=version,
+        )
+        .first()
+    )
+
+    if history is None:
+        return None
+
+    return WorkflowConfig(
+        include_risk_step=history.include_risk_step,
+        include_policy_step=history.include_policy_step,
+        execution_mode=history.execution_mode,
+    )
+
+def load_policy_version(
+    db: Session,
+    tenant_id: str,
+    policy_id: int,
+    version: int,
+) -> Policy | None:
+    record = db.get(PolicyRecord, policy_id)
+
+    if (
+        record is not None
+        and record.tenant_id == tenant_id
+        and record.version == version
+    ):
+        return Policy(
+            name=record.name,
+            effect=record.effect,
+            policy_id=record.id,
+            priority=record.priority,
+            version=record.version,
+            request_types=tuple(
+                value.strip()
+                for value in record.request_types.split(",")
+                if value.strip()
+            ),
+            countries=tuple(
+                value.strip()
+                for value in record.countries.split(",")
+                if value.strip()
+            ),
+            device_ids=tuple(
+                value.strip()
+                for value in record.device_ids.split(",")
+                if value.strip()
+            ),
+            max_risk_score=record.max_risk_score,
+            min_trust_score=record.min_trust_score,
+            max_transaction_amount=record.max_transaction_amount,
+            allowed_start_hour=record.allowed_start_hour,
+            allowed_end_hour=record.allowed_end_hour,
+            valid_from=record.valid_from,
+            expires_at=record.expires_at,
+        )
+
+    history = (
+        db.query(PolicyHistory)
+        .filter_by(
+            tenant_id=tenant_id,
+            policy_id=policy_id,
+            version=version,
+        )
+        .first()
+    )
+
+    if history is None:
+        return None
+
+    return Policy(
+        name=history.policy_name,
+        effect=history.effect,
+        policy_id=history.policy_id,
+        priority=history.priority,
+        version=history.version,
+        request_types=tuple(
+            value.strip()
+            for value in history.request_types.split(",")
+            if value.strip()
+        ),
+        countries=tuple(
+            value.strip()
+            for value in history.countries.split(",")
+            if value.strip()
+        ),
+        device_ids=tuple(
+            value.strip()
+            for value in history.device_ids.split(",")
+            if value.strip()
+        ),
+        max_risk_score=history.max_risk_score,
+        min_trust_score=history.min_trust_score,
+        max_transaction_amount=history.max_transaction_amount,
+        allowed_start_hour=history.allowed_start_hour,
+        allowed_end_hour=history.allowed_end_hour,
+        valid_from=history.valid_from,
+        expires_at=history.expires_at,
+    )
 
 try:
     redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
@@ -433,6 +562,8 @@ def update_workflow_config(
         )
         db.add(record)
     else:
+
+        save_workflow_config_history(db, record)
         record.include_risk_step = payload.include_risk_step
         record.include_policy_step = payload.include_policy_step
         record.execution_mode = payload.execution_mode
@@ -476,6 +607,35 @@ def get_workflow_config(
         "execution_mode": record.execution_mode,
         "version": record.version,
     }
+
+@app.get("/admin/workflow-config/{tenant_id}/history")
+def get_workflow_config_history(
+    tenant_id: str,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    if not db.get(Tenant, tenant_id):
+        raise HTTPException(status_code=404, detail="tenant_not_found")
+
+    history = (
+        db.query(WorkflowConfigHistory)
+        .filter_by(tenant_id=tenant_id)
+        .order_by(WorkflowConfigHistory.version.asc())
+        .all()
+    )
+
+    return [
+        {
+            "id": item.id,
+            "tenant_id": item.tenant_id,
+            "version": item.version,
+            "include_risk_step": item.include_risk_step,
+            "include_policy_step": item.include_policy_step,
+            "execution_mode": item.execution_mode,
+            "created_at": item.created_at,
+        }
+        for item in history
+    ]
 
 @app.post("/admin/policies")
 def create_policy(
@@ -1260,6 +1420,153 @@ def get_audit_logs(
         }
         for log in logs
     ]
+
+@app.get("/admin/audit/logs/{log_id}/replay")
+def replay_audit_log(
+    log_id: int,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    log = db.get(RequestLog, log_id)
+
+    if log is None:
+        raise HTTPException(status_code=404, detail="request_log_not_found")
+
+    workflow = None
+    if log.workflow_version is not None:
+        workflow = load_workflow_config_version(
+            db,
+            log.tenant_id,
+            log.workflow_version,
+        )
+
+    policy = None
+    if log.policy_id is not None and log.policy_version is not None:
+        policy = load_policy_version(
+            db,
+            log.tenant_id,
+            log.policy_id,
+            log.policy_version,
+        )
+
+    historical_logs = list(
+        db.scalars(
+            select(RequestLog)
+            .where(
+                RequestLog.tenant_id == log.tenant_id,
+                RequestLog.right_id == log.right_id,
+                RequestLog.created_at < log.created_at,
+            )
+            .order_by(desc(RequestLog.created_at))
+            .limit(50)
+        )
+    )
+
+    replay_risk = risk_engine.evaluate(
+        request_type=log.request_type,
+        device_id=log.device_id,
+        ip_address=log.ip_hash,
+        country_code=log.country_code,
+        historical_logs=historical_logs,
+        now=log.created_at,
+    )
+
+    replay_policy_engine = PolicyEngine(
+        [policy] if policy is not None else []
+    )
+
+    replay_policy = replay_policy_engine.evaluate(
+        request_type=log.request_type,
+        device_id=log.device_id,
+        country_code=log.country_code,
+        risk_score=replay_risk.risk_score,
+        trust_score=replay_risk.trust_score,
+        context={
+            "now": log.created_at,
+            "hour": log.created_at.hour,
+            "transaction_amount": log.transaction_amount,
+        },
+    )
+
+    replay_workflow_engine = WorkflowEngine(
+        workflow or WorkflowConfig()
+    )
+
+    replay_allowed = replay_workflow_engine.resolve_allowed(
+        risk_allowed=replay_risk.allow,
+        policy_matched=replay_policy.matched,
+        policy_allowed=replay_policy.allow,
+    )
+
+    replay_reason = replay_risk.reason
+
+    if replay_policy.matched:
+        if not replay_risk.allow:
+            replay_reason = replay_risk.reason
+        else:
+            replay_reason = replay_policy.reason
+
+    return {
+        "log_id": log.id,
+        "trace_id": log.trace_id,
+        "tenant_id": log.tenant_id,
+        "request": {
+            "request_type": log.request_type,
+            "device_id": log.device_id,
+            "country_code": log.country_code,
+            "transaction_amount": log.transaction_amount,
+            "new_owner_id": log.new_owner_id,
+        },
+        "original_decision": {
+            "allowed": log.allowed,
+            "reason": log.reason,
+            "risk_score": log.risk_score,
+            "risk_signals": log.risk_signals,
+            "decision_version": log.decision_version,
+        },
+        "original": {
+            "allow": log.allowed,
+            "reason": log.reason,
+            "risk_score": log.risk_score,
+            "risk_signals": log.risk_signals,
+            "decision_version": log.decision_version,
+        },
+        "replayed": {
+            "allow": replay_allowed,
+            "reason": replay_reason,
+            "risk_score": replay_risk.risk_score,
+            "risk_signals": list(replay_risk.signals),
+            "policy_matched": replay_policy.matched,
+            "policy_id": replay_policy.policy_id,
+            "policy_version": replay_policy.policy_version,
+        },
+        "comparison": {
+            "decision_match": replay_allowed == log.allowed,
+            "risk_score_match": replay_risk.risk_score == log.risk_score,
+        },
+
+        "workflow": None if workflow is None else {
+            "version": log.workflow_version,
+            "include_risk_step": workflow.include_risk_step,
+            "include_policy_step": workflow.include_policy_step,
+            "execution_mode": workflow.execution_mode,
+        },
+        "policy": None if policy is None else {
+            "policy_id": policy.policy_id,
+            "version": policy.version,
+            "name": policy.name,
+            "effect": policy.effect,
+            "priority": policy.priority,
+            "request_types": list(policy.request_types),
+            "countries": list(policy.countries),
+            "device_ids": list(policy.device_ids),
+            "max_risk_score": policy.max_risk_score,
+            "min_trust_score": policy.min_trust_score,
+            "max_transaction_amount": policy.max_transaction_amount,
+            "allowed_start_hour": policy.allowed_start_hour,
+            "allowed_end_hour": policy.allowed_end_hour,
+        },
+    }
 
 @app.get("/admin/audit/logs/count")
 def get_audit_log_count(
