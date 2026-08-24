@@ -1833,3 +1833,34 @@ def test_policy_multiple_versions_remain_replayable(client):
     assert version_3.version == 3
     assert version_3.priority == 1
     assert version_3.max_transaction_amount == 20000
+
+def test_replay_returns_409_when_historical_workflow_is_missing(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        log.workflow_version = 999
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 409
+    assert replay.json()["detail"] == "historical_workflow_version_not_found"

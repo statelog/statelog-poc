@@ -1440,6 +1440,11 @@ def replay_audit_log(
             log.tenant_id,
             log.workflow_version,
         )
+        if workflow is None:
+            raise HTTPException(
+                status_code=409,
+                detail="historical_workflow_version_not_found",
+            )
 
     policy = None
     if log.policy_id is not None and log.policy_version is not None:
@@ -1449,6 +1454,11 @@ def replay_audit_log(
             log.policy_id,
             log.policy_version,
         )
+        if policy is None:
+            raise HTTPException(
+                status_code=409,
+                detail="historical_policy_version_not_found",
+            )
 
     historical_logs = list(
         db.scalars(
