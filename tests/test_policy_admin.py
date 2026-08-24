@@ -1741,3 +1741,95 @@ def test_replay_survives_policy_deletion(client):
     assert body["replayed"]["allow"] is False
     assert body["comparison"]["decision_match"] is True
     assert body["comparison"]["risk_score_match"] is True
+
+def test_policy_multiple_versions_remain_replayable(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "multi-version-policy",
+            "effect": "deny",
+            "priority": 10,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": None,
+            "min_trust_score": None,
+            "max_transaction_amount": 10000,
+            "allowed_start_hour": None,
+            "allowed_end_hour": None,
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+    assert created.json()["version"] == 1
+
+    version_2_response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "priority": 5,
+            "max_transaction_amount": 15000,
+        },
+    )
+
+    assert version_2_response.status_code == 200
+    assert version_2_response.json()["version"] == 2
+
+    version_3_response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "priority": 1,
+            "max_transaction_amount": 20000,
+        },
+    )
+
+    assert version_3_response.status_code == 200
+    assert version_3_response.json()["version"] == 3
+
+    from app.database import SessionLocal
+    from app.main import load_policy_version
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(
+            db,
+            "tenant-demo",
+            policy_id,
+            1,
+        )
+        version_2 = load_policy_version(
+            db,
+            "tenant-demo",
+            policy_id,
+            2,
+        )
+        version_3 = load_policy_version(
+            db,
+            "tenant-demo",
+            policy_id,
+            3,
+        )
+
+    assert version_1 is not None
+    assert version_1.policy_id == policy_id
+    assert version_1.version == 1
+    assert version_1.priority == 10
+    assert version_1.max_transaction_amount == 10000
+
+    assert version_2 is not None
+    assert version_2.policy_id == policy_id
+    assert version_2.version == 2
+    assert version_2.priority == 5
+    assert version_2.max_transaction_amount == 15000
+
+    assert version_3 is not None
+    assert version_3.policy_id == policy_id
+    assert version_3.version == 3
+    assert version_3.priority == 1
+    assert version_3.max_transaction_amount == 20000
