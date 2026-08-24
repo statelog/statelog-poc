@@ -1588,3 +1588,71 @@ def test_replay_ignores_future_request_logs(client):
 
     assert after["comparison"]["decision_match"] is True
     assert after["comparison"]["risk_score_match"] is True
+
+def test_replay_re_evaluates_ownership_transfer(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    original = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        new_owner_id="user-456",
+    )
+
+    assert original.status_code == 200
+    assert original.json()["allow"] is True
+
+    trace_id = original.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    log_id = matching[0]["id"]
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["request"]["request_type"] == "ownership_transfer"
+    assert body["request"]["new_owner_id"] == "user-456"
+
+    assert body["original"]["allow"] is True
+    assert body["replayed"]["allow"] is True
+
+    assert body["comparison"]["decision_match"] is True
+    assert body["comparison"]["risk_score_match"] is True
