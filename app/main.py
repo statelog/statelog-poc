@@ -1447,6 +1447,13 @@ def replay_audit_log(
             )
 
     policy = None
+
+    if (log.policy_id is None) != (log.policy_version is None):
+        raise HTTPException(
+            status_code=409,
+            detail="historical_policy_reference_incomplete",
+        )
+
     if log.policy_id is not None and log.policy_version is not None:
         policy = load_policy_version(
             db,

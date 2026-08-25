@@ -1906,7 +1906,7 @@ def test_replay_returns_409_when_historical_policy_is_missing(client):
         assert log.policy_id is not None
         assert log.policy_version is not None
 
-        log.workflow_version = None
+        log.workflow_version = None    
         log.policy_version = 999
         db.commit()
         log_id = log.id
@@ -1928,3 +1928,57 @@ def test_replay_returns_404_when_request_log_not_found(client):
 
     assert replay.status_code == 404
     assert replay.json()["detail"] == "request_log_not_found"
+
+def test_replay_returns_409_when_historical_policy_reference_is_incomplete(client):
+    ensure_setup(client)
+
+    policy = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "incomplete-reference-policy",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+        },
+    )
+
+    assert policy.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    assert original.json()["allow"] is False
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        assert log.policy_id is not None
+        assert log.policy_version is not None
+
+        log.workflow_version = None
+        log.policy_version = None
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 409
+    assert replay.json()["detail"] == "historical_policy_reference_incomplete"
