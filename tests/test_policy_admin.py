@@ -2019,3 +2019,40 @@ def test_replay_detects_risk_score_mismatch(client):
 
     assert body["replayed"]["risk_score"] != body["original"]["risk_score"]
     assert body["comparison"]["risk_score_match"] is False
+
+def test_replay_detects_decision_mismatch(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.workflow_version = None
+        log.allowed = not log.allowed
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["replayed"]["allow"] != body["original"]["allow"]
+    assert body["comparison"]["decision_match"] is False
