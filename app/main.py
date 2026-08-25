@@ -1562,6 +1562,8 @@ def replay_audit_log(
             "decision_match": replay_allowed == log.allowed,
             "risk_score_match": replay_risk.risk_score == log.risk_score,
             "reason_match": replay_reason == log.reason,
+            "risk_signals_match": list(replay_risk.signals)
+            == [signal for signal in log.risk_signals.split(",") if signal],
         },
 
         "workflow": None if workflow is None else {
