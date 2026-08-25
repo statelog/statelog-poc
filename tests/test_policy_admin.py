@@ -2138,3 +2138,54 @@ def test_replay_preserves_decision_version_after_runtime_change(client, monkeypa
 
     assert body["original_decision"]["decision_version"] == "historical-v1"
     assert body["original"]["decision_version"] == "historical-v1"
+
+def test_replay_preserves_original_request_context(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(
+        client,
+        token,
+        ip_address="10.20.30.40",
+        country_code="EE",
+    )
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        expected_request_type = log.request_type
+        expected_device_id = log.device_id
+        expected_country_code = log.country_code
+        expected_transaction_amount = log.transaction_amount
+        expected_new_owner_id = log.new_owner_id
+
+        log.workflow_version = None
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["request"]["request_type"] == expected_request_type
+    assert body["request"]["device_id"] == expected_device_id
+    assert body["request"]["country_code"] == expected_country_code
+    assert body["request"]["transaction_amount"] == expected_transaction_amount
+    assert body["request"]["new_owner_id"] == expected_new_owner_id
