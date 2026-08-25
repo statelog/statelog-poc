@@ -2333,3 +2333,115 @@ def test_replay_detects_risk_signals_mismatch(client):
     body = replay.json()
 
     assert body["comparison"]["risk_signals_match"] is False
+
+def test_replay_reports_matching_policy(client):
+    ensure_setup(client)
+
+    policy = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "replay-policy-match",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+        },
+    )
+
+    assert policy.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    assert original.json()["allow"] is False
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.workflow_version = None
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["replayed"]["policy_matched"] is True
+    assert body["comparison"]["policy_match"] is True
+
+def test_replay_detects_policy_mismatch(client):
+    ensure_setup(client)
+
+    policy = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "replay-policy-mismatch",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+        },
+    )
+
+    assert policy.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    assert original.json()["allow"] is False
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        assert log.policy_id is not None
+        assert log.policy_version is not None
+
+        log.workflow_version = None
+        log.country_code = "FI"
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["replayed"]["policy_matched"] is False
+    assert body["comparison"]["policy_match"] is False
