@@ -1918,3 +1918,13 @@ def test_replay_returns_409_when_historical_policy_is_missing(client):
 
     assert replay.status_code == 409
     assert replay.json()["detail"] == "historical_policy_version_not_found"
+def test_replay_returns_404_when_request_log_not_found(client):
+    ensure_setup(client)
+
+    replay = client.get(
+        "/admin/audit/logs/999999/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 404
+    assert replay.json()["detail"] == "request_log_not_found"
