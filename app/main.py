@@ -1561,6 +1561,7 @@ def replay_audit_log(
         "comparison": {
             "decision_match": replay_allowed == log.allowed,
             "risk_score_match": replay_risk.risk_score == log.risk_score,
+            "reason_match": replay_reason == log.reason,
         },
 
         "workflow": None if workflow is None else {
