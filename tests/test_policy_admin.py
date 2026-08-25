@@ -2189,3 +2189,38 @@ def test_replay_preserves_original_request_context(client):
     assert body["request"]["country_code"] == expected_country_code
     assert body["request"]["transaction_amount"] == expected_transaction_amount
     assert body["request"]["new_owner_id"] == expected_new_owner_id
+
+def test_replay_preserves_decision_reason(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.workflow_version = None
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["replayed"]["reason"] == body["original"]["reason"]
