@@ -2335,6 +2335,7 @@ def test_replay_detects_risk_signals_mismatch(client):
     body = replay.json()
 
     assert body["comparison"]["risk_signals_match"] is False
+    assert body["comparison"]["all_match"] is False
 
 def test_replay_reports_matching_policy(client):
     ensure_setup(client)
