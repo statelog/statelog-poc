@@ -1566,6 +1566,7 @@ def replay_audit_log(
             == [signal for signal in log.risk_signals.split(",") if signal],
             "policy_match": replay_policy.policy_id == log.policy_id,
             "policy_version_match": replay_policy.policy_version == log.policy_version,
+            
         },
 
         "workflow": None if workflow is None else {
