@@ -286,3 +286,89 @@ def test_geo_change_does_not_trigger_when_country_seen_in_ten_most_recent_logs()
     )
 
     assert "geo_change" not in decision.signals
+
+def test_transfer_velocity_includes_transfers_exactly_one_hour_old():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"transfer-ip-{i}",
+            country_code="EE",
+            request_type="ownership_transfer",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=f"one-hour-transfer-trace-{i}",
+            idempotency_key=f"one-hour-transfer-idem-{i}",
+            request_fingerprint=f"one-hour-transfer-fingerprint-{i}",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(hours=1),
+        )
+        for i in range(2)
+    ]
+
+    engine = RiskEngine()
+
+    decision = engine.evaluate(
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert "transfer_velocity" in decision.signals
+    assert "sensitive_action" not in decision.signals
+
+def test_transfer_velocity_excludes_transfers_older_than_one_hour():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"old-transfer-ip-{i}",
+            country_code="EE",
+            request_type="ownership_transfer",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=f"over-one-hour-transfer-trace-{i}",
+            idempotency_key=f"over-one-hour-transfer-idem-{i}",
+            request_fingerprint=f"over-one-hour-transfer-fingerprint-{i}",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(hours=1, seconds=1),
+        )
+        for i in range(2)
+    ]
+
+    engine = RiskEngine()
+
+    decision = engine.evaluate(
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert "transfer_velocity" not in decision.signals
+    assert "sensitive_action" in decision.signals
