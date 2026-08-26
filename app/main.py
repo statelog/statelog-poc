@@ -6,7 +6,7 @@ import time
 import uuid
 import jwt
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -892,6 +892,50 @@ def get_policy_history(
         }
         for item in history
     ]
+def load_risk_history(
+    db: Session,
+    tenant_id: str,
+    right_id: str,
+    *,
+    before: datetime | None = None,
+) -> list[RequestLog]:
+    reference_time = before or utcnow_naive()
+    one_hour_ago = reference_time - timedelta(hours=1)
+
+    conditions = [
+        RequestLog.tenant_id == tenant_id,
+        RequestLog.right_id == right_id,
+    ]
+
+    if before is not None:
+        conditions.append(RequestLog.created_at < before)
+
+    recent_by_time = list(
+        db.scalars(
+            select(RequestLog)
+            .where(
+                *conditions,
+                RequestLog.created_at >= one_hour_ago,
+            )
+            .order_by(desc(RequestLog.created_at))
+        )
+    )
+
+    latest_ten = list(
+        db.scalars(
+            select(RequestLog)
+            .where(*conditions)
+            .order_by(desc(RequestLog.created_at))
+            .limit(10)
+        )
+    )
+
+    logs_by_id = {log.id: log for log in recent_by_time}
+    for log in latest_ten:
+        logs_by_id[log.id] = log
+
+    return list(logs_by_id.values())
+
 @app.post("/admin/devices")
 def create_device(payload: DeviceCreate, db: Session = Depends(get_db), client: ClientCredential = Depends(get_client)):
     if client.tenant_id != payload.tenant_id:
@@ -1073,13 +1117,10 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         if cached:
             return DecisionResponse(**cached)
 
-    history = list(
-        db.scalars(
-            select(RequestLog)
-            .where(RequestLog.tenant_id == tenant.id, RequestLog.right_id == right.right_id)
-            .order_by(desc(RequestLog.created_at))
-            .limit(50)
-        )
+    history = load_risk_history(
+        db,
+        tenant.id,
+        right.right_id,
     )
     decision = risk_engine.evaluate(
         request_type=payload.request_type,
@@ -1466,18 +1507,11 @@ def replay_audit_log(
                 status_code=409,
                 detail="historical_policy_version_not_found",
             )
-
-    historical_logs = list(
-        db.scalars(
-            select(RequestLog)
-            .where(
-                RequestLog.tenant_id == log.tenant_id,
-                RequestLog.right_id == log.right_id,
-                RequestLog.created_at < log.created_at,
-            )
-            .order_by(desc(RequestLog.created_at))
-            .limit(50)
-        )
+    historical_logs = load_risk_history(
+        db,
+        log.tenant_id,
+        log.right_id,
+        before=log.created_at,
     )
 
     replay_risk = risk_engine.evaluate(

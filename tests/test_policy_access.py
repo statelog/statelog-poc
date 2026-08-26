@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+from app.time_utils import utcnow_naive
 from app.models import PolicyRecord, RequestLog
 from app.models import PolicyRecord
 
@@ -1052,3 +1053,85 @@ def test_access_request_respects_transaction_amount_policy(client):
     body = response.json()
 
     assert body["policy_matched"] is False
+def test_transfer_velocity_survives_more_than_fifty_newer_unrelated_logs(client):
+    ensure_setup(client)
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        for i in range(2):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"transfer-history-ip-{i}",
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"transfer-history-trace-{i}",
+                    idempotency_key=f"transfer-history-idem-{i}",
+                    request_fingerprint=f"transfer-history-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=50 + i),
+                )
+            )
+
+        for i in range(50):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"noise-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"noise-trace-{i}",
+                    idempotency_key=f"noise-idem-{i}",
+                    request_fingerprint=f"noise-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(seconds=i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        request_type="ownership_transfer",
+        new_owner_id="user-456",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "transfer_velocity" in body["risk_signals"]
