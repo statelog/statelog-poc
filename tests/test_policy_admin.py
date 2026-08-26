@@ -2448,6 +2448,7 @@ def test_replay_detects_policy_mismatch(client):
 
     assert body["replayed"]["policy_matched"] is False
     assert body["comparison"]["policy_match"] is False
+    assert body["comparison"]["all_match"] is False
 
 def test_replay_reports_matching_policy_version(client):
     ensure_setup(client)
@@ -2505,6 +2506,7 @@ def test_replay_reports_matching_policy_version(client):
 
     assert body["comparison"]["policy_match"] is True
     assert body["comparison"]["policy_version_match"] is True
+    assert body["comparison"]["all_match"] is True
 
 def test_replay_ignores_request_logs_with_same_timestamp(client):
     ensure_setup(client)
