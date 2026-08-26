@@ -2588,3 +2588,173 @@ def test_replay_ignores_request_logs_with_same_timestamp(client):
     assert after["replayed"]["risk_signals"] == before["replayed"]["risk_signals"]
     assert after["comparison"]["decision_match"] is True
     assert after["comparison"]["risk_score_match"] is True
+
+def test_replay_includes_failures_exactly_15_minutes_old(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from datetime import timedelta
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.workflow_version = None
+        db.commit()
+
+        log_id = log.id
+        original_created_at = log.created_at
+
+    replay_before = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay_before.status_code == 200
+    before = replay_before.json()
+
+    with SessionLocal() as db:
+        original_log = db.get(RequestLog, log_id)
+
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id=original_log.tenant_id,
+                    right_id=original_log.right_id,
+                    client_id=original_log.client_id,
+                    source_client=original_log.source_client,
+                    device_id=original_log.device_id,
+                    user_id=original_log.user_id,
+                    ip_hash=original_log.ip_hash,
+                    country_code=original_log.country_code,
+                    request_type=original_log.request_type,
+                    transaction_amount=original_log.transaction_amount,
+                    new_owner_id=original_log.new_owner_id,
+                    allowed=False,
+                    risk_score=80,
+                    reason="boundary_failure",
+                    risk_signals="failure_burst",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_id=None,
+                    policy_version=None,
+                    trace_id=f"boundary-15m-trace-{i}",
+                    idempotency_key=f"boundary-15m-idem-{i}",
+                    token_jti=None,
+                    request_fingerprint=f"boundary-15m-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    workflow_version=None,
+                    created_at=original_created_at - timedelta(minutes=15),
+                )
+            )
+
+        db.commit()
+
+    replay_after = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay_after.status_code == 200
+    after = replay_after.json()
+
+    assert "failure_burst" in after["replayed"]["risk_signals"]
+    assert after["replayed"]["risk_score"] >= before["replayed"]["risk_score"]
+
+def test_replay_excludes_failures_older_than_15_minutes(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from datetime import timedelta
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.workflow_version = None
+        db.commit()
+
+        log_id = log.id
+        original_created_at = log.created_at
+
+    replay_before = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay_before.status_code == 200
+    before = replay_before.json()
+
+    with SessionLocal() as db:
+        original_log = db.get(RequestLog, log_id)
+
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id=original_log.tenant_id,
+                    right_id=original_log.right_id,
+                    client_id=original_log.client_id,
+                    source_client=original_log.source_client,
+                    device_id=original_log.device_id,
+                    user_id=original_log.user_id,
+                    ip_hash=original_log.ip_hash,
+                    country_code=original_log.country_code,
+                    request_type=original_log.request_type,
+                    transaction_amount=original_log.transaction_amount,
+                    new_owner_id=original_log.new_owner_id,
+                    allowed=False,
+                    risk_score=80,
+                    reason="older_boundary_failure",
+                    risk_signals="failure_burst",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_id=None,
+                    policy_version=None,
+                    trace_id=f"boundary-over-15m-trace-{i}",
+                    idempotency_key=f"boundary-over-15m-idem-{i}",
+                    token_jti=None,
+                    request_fingerprint=f"boundary-over-15m-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    workflow_version=None,
+                    created_at=original_created_at - timedelta(minutes=15, seconds=1),
+                )
+            )
+
+        db.commit()
+
+    replay_after = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay_after.status_code == 200
+    after = replay_after.json()
+
+    assert after["replayed"]["risk_score"] == before["replayed"]["risk_score"]
+    assert after["replayed"]["risk_signals"] == before["replayed"]["risk_signals"]
