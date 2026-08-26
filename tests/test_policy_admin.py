@@ -2502,3 +2502,89 @@ def test_replay_reports_matching_policy_version(client):
 
     assert body["comparison"]["policy_match"] is True
     assert body["comparison"]["policy_version_match"] is True
+
+def test_replay_ignores_request_logs_with_same_timestamp(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.workflow_version = None
+        db.commit()
+
+        log_id = log.id
+        original_created_at = log.created_at
+
+    replay_before = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay_before.status_code == 200
+    before = replay_before.json()
+
+    with SessionLocal() as db:
+        original_log = db.get(RequestLog, log_id)
+
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id=original_log.tenant_id,
+                    right_id=original_log.right_id,
+                    client_id=original_log.client_id,
+                    source_client=original_log.source_client,
+                    device_id=original_log.device_id,
+                    user_id=original_log.user_id,
+                    ip_hash=f"same-time-ip-{i}",
+                    country_code=original_log.country_code,
+                    request_type=original_log.request_type,
+                    transaction_amount=original_log.transaction_amount,
+                    new_owner_id=original_log.new_owner_id,
+                    allowed=False,
+                    risk_score=80,
+                    reason="same_timestamp_denial",
+                    risk_signals="failure_burst",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_id=None,
+                    policy_version=None,
+                    trace_id=f"same-time-trace-{i}",
+                    idempotency_key=f"same-time-idem-{i}",
+                    token_jti=None,
+                    request_fingerprint=f"same-time-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    workflow_version=None,
+                    created_at=original_created_at,
+                )
+            )
+
+        db.commit()
+
+    replay_after = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay_after.status_code == 200
+    after = replay_after.json()
+
+    assert after["replayed"]["allow"] == before["replayed"]["allow"]
+    assert after["replayed"]["risk_score"] == before["replayed"]["risk_score"]
+    assert after["replayed"]["risk_signals"] == before["replayed"]["risk_signals"]
+    assert after["comparison"]["decision_match"] is True
+    assert after["comparison"]["risk_score_match"] is True
