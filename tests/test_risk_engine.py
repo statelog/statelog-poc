@@ -175,3 +175,114 @@ def test_new_ip_does_not_trigger_when_seen_in_five_most_recent_logs():
     )
 
     assert "new_ip" not in decision.signals
+
+def test_geo_change_uses_only_ten_most_recent_logs():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="old-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            policy_matched=False,
+            policy_name=None,
+            trace_id="old-ee-trace",
+            idempotency_key="old-ee-idem",
+            request_fingerprint="old-ee-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(minutes=11),
+        )
+    ]
+
+    for i in range(10):
+        logs.append(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=f"recent-ip-{i}",
+                country_code="FI",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                policy_matched=False,
+                policy_name=None,
+                trace_id=f"recent-country-trace-{i}",
+                idempotency_key=f"recent-country-idem-{i}",
+                request_fingerprint=f"recent-country-fingerprint-{i}",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=10 - i),
+            )
+        )
+
+    engine = RiskEngine()
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert "geo_change" in decision.signals
+
+def test_geo_change_does_not_trigger_when_country_seen_in_ten_most_recent_logs():
+    now = utcnow_naive()
+
+    logs = []
+
+    for i in range(10):
+        logs.append(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=f"recent-country-ip-{i}",
+                country_code="EE" if i == 0 else "FI",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                policy_matched=False,
+                policy_name=None,
+                trace_id=f"recent-country-ten-trace-{i}",
+                idempotency_key=f"recent-country-ten-idem-{i}",
+                request_fingerprint=f"recent-country-ten-fingerprint-{i}",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=10 - i),
+            )
+        )
+
+    engine = RiskEngine()
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert "geo_change" not in decision.signals
