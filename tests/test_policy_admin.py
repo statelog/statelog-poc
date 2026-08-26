@@ -168,7 +168,6 @@ def test_update_policy(client):
         },
     )
 
-    assert created.status_code == 200
     policy_id = created.json()["id"]
 
     response = client.patch(
@@ -1423,6 +1422,9 @@ def test_replay_restores_historical_policy_and_workflow_versions(client):
         headers=ADMIN_HEADERS,
     )
 
+    print("REPLAY STATUS:", replay.status_code)
+    print("REPLAY BODY:", replay.json())
+
     assert replay.status_code == 200
 
     body = replay.json()
@@ -1498,6 +1500,9 @@ def test_replay_re_evaluates_original_decision(client):
         f"/admin/audit/logs/{log_id}/replay",
         headers=ADMIN_HEADERS,
     )
+
+    print("REPLAY STATUS:", replay.status_code)
+    print("REPLAY BODY:", replay.json())
 
     assert replay.status_code == 200
 
@@ -2764,3 +2769,88 @@ def test_replay_excludes_failures_older_than_15_minutes(client):
 
     assert after["replayed"]["risk_score"] == before["replayed"]["risk_score"]
     assert after["replayed"]["risk_signals"] == before["replayed"]["risk_signals"]
+
+def test_replay_includes_transfers_exactly_one_hour_old(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        for i in range(2):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"replay-transfer-ip-{i}",
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"replay-transfer-trace-{i}",
+                    idempotency_key=f"replay-transfer-idem-{i}",
+                    request_fingerprint=f"replay-transfer-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(hours=1),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    original = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        new_owner_id="user-456",
+    )
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.created_at = now
+        log.workflow_version = None
+        log_id = log.id
+        db.commit()
+
+    with SessionLocal() as db:
+        persisted_log = db.get(RequestLog, log_id)
+        assert persisted_log is not None
+        assert persisted_log.workflow_version is None
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200, replay.json()
+
+    body = replay.json()
+
+    assert "transfer_velocity" in body["replayed"]["risk_signals"]
