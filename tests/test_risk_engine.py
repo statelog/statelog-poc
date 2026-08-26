@@ -76,7 +76,7 @@ def test_new_ip_uses_only_five_most_recent_logs():
             source_client="gateway-1",
             device_id="gate-A1",
             user_id="user-123",
-            ip_hash="current-ip",
+            ip_hash="old-ip",
             country_code="EE",
             request_type="access",
             allowed=True,
@@ -372,3 +372,95 @@ def test_transfer_velocity_excludes_transfers_older_than_one_hour():
 
     assert "transfer_velocity" not in decision.signals
     assert "sensitive_action" in decision.signals
+
+def test_risk_score_exactly_seventy_denies():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="old-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=False,
+            risk_score=80,
+            reason="previous_denial",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=f"threshold-trace-{i}",
+            idempotency_key=f"threshold-idem-{i}",
+            request_fingerprint=f"threshold-fingerprint-{i}",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(minutes=5),
+        )
+        for i in range(3)
+    ]
+
+    engine = RiskEngine()
+
+    decision = engine.evaluate(
+        request_type="ownership_transfer",
+        device_id="new-device",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert decision.risk_score == 70
+    assert decision.allow is False
+    assert decision.trust_score == 30
+    assert "failure_burst" in decision.signals
+    assert "new_device" in decision.signals
+    assert "new_ip" in decision.signals
+    assert "sensitive_action" in decision.signals
+
+def test_risk_score_sixty_allows():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="old-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=False,
+            risk_score=80,
+            reason="previous_denial",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=f"threshold-65-trace-{i}",
+            idempotency_key=f"threshold-65-idem-{i}",
+            request_fingerprint=f"threshold-65-fingerprint-{i}",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(minutes=5),
+        )
+        for i in range(3)
+    ]
+
+    engine = RiskEngine()
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="new-device",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert decision.risk_score == 60
+    assert decision.allow is True
+    assert decision.trust_score == 40
