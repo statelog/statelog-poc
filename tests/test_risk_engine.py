@@ -464,3 +464,47 @@ def test_risk_score_sixty_allows():
     assert decision.risk_score == 60
     assert decision.allow is True
     assert decision.trust_score == 40
+
+def test_trust_score_clamps_to_zero_when_risk_exceeds_one_hundred():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="old-device",
+            user_id="user-123",
+            ip_hash="old-ip",
+            country_code="FI",
+            request_type="ownership_transfer",
+            allowed=False,
+            risk_score=80,
+            reason="previous_denial",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=f"high-risk-trace-{i}",
+            idempotency_key=f"high-risk-idem-{i}",
+            request_fingerprint=f"high-risk-fingerprint-{i}",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(minutes=5),
+        )
+        for i in range(3)
+    ]
+
+    engine = RiskEngine()
+
+    decision = engine.evaluate(
+        request_type="ownership_transfer",
+        device_id="new-device",
+        ip_address="new-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert decision.risk_score > 100
+    assert decision.allow is False
+    assert decision.trust_score == 0
