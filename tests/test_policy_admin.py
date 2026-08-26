@@ -2446,6 +2446,7 @@ def test_replay_detects_policy_mismatch(client):
 
     body = replay.json()
 
+    assert body["workflow"] is None
     assert body["replayed"]["policy_matched"] is False
     assert body["comparison"]["policy_match"] is False
     assert body["comparison"]["all_match"] is False
