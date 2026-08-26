@@ -2225,6 +2225,7 @@ def test_replay_preserves_decision_reason(client):
 
     assert body["replayed"]["reason"] == body["original"]["reason"]
     assert body["comparison"]["reason_match"] is True
+    assert body["comparison"]["all_match"] is True
 
 def test_replay_detects_decision_reason_mismatch(client):
     ensure_setup(client)
@@ -2262,6 +2263,7 @@ def test_replay_detects_decision_reason_mismatch(client):
 
     assert body["replayed"]["reason"] != body["original"]["reason"]
     assert body["comparison"]["reason_match"] is False
+    assert body["comparison"]["all_match"] is False
 
 def test_replay_reports_matching_risk_signals(client):
     ensure_setup(client)
