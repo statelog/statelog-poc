@@ -3056,3 +3056,53 @@ def test_load_risk_history_excludes_log_at_before_boundary(client):
 
         assert "boundary-older-trace" in trace_ids
         assert "boundary-exact-trace" not in trace_ids
+
+def test_load_risk_history_includes_log_exactly_one_hour_old(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    reference_time = utcnow_naive()
+
+    with SessionLocal() as db:
+        log = RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="hour-boundary-ip",
+            country_code="EE",
+            request_type="ownership_transfer",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id="hour-boundary-trace",
+            idempotency_key="hour-boundary-idem",
+            request_fingerprint="hour-boundary-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=reference_time - timedelta(hours=1),
+        )
+
+        db.add(log)
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            before=reference_time,
+        )
+
+        trace_ids = {item.trace_id for item in history}
+
+        assert "hour-boundary-trace" in trace_ids
