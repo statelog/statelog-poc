@@ -2928,3 +2928,56 @@ def test_replay_includes_old_log_when_in_latest_ten(client):
     body = replay.json()
 
     assert "new_ip" in body["replayed"]["risk_signals"]
+
+def test_load_risk_history_deduplicates_overlapping_logs(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        log = RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="dedup-history-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id="dedup-history-trace",
+            idempotency_key="dedup-history-idem",
+            request_fingerprint="dedup-history-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now,
+        )
+        db.add(log)
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            before=now + timedelta(seconds=1),
+        )
+
+        matching = [
+            item
+            for item in history
+            if item.trace_id == "dedup-history-trace"
+        ]
+
+        assert len(matching) == 1
