@@ -3183,3 +3183,72 @@ def test_load_risk_history_excludes_old_log_outside_latest_ten(client):
         trace_ids = {item.trace_id for item in history}
 
         assert "outside-latest-ten-old-trace" not in trace_ids
+
+def test_load_risk_history_isolates_tenant_and_right(client):
+    ensure_setup(client)
+
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    def make_log(tenant_id, right_id, trace_id):
+        return RequestLog(
+            tenant_id=tenant_id,
+            right_id=right_id,
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"{trace_id}-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=trace_id,
+            idempotency_key=f"{trace_id}-idem",
+            request_fingerprint=f"{trace_id}-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now,
+        )
+
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                make_log(
+                    "tenant-demo",
+                    "right-001",
+                    "history-isolation-target",
+                ),
+                make_log(
+                    "tenant-demo",
+                    "right-777",
+                    "history-isolation-other-right",
+                ),
+                make_log(
+                    "tenant-other",
+                    "right-001",
+                    "history-isolation-other-tenant",
+                ),
+            ]
+        )
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+        )
+
+        trace_ids = {item.trace_id for item in history}
+
+        assert "history-isolation-target" in trace_ids
+        assert "history-isolation-other-right" not in trace_ids
+        assert "history-isolation-other-tenant" not in trace_ids
