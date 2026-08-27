@@ -3310,3 +3310,79 @@ def test_load_risk_history_same_timestamp_latest_ten_is_deterministic(client):
         returned_ids = {log.id for log in history if log.id in inserted_ids}
 
     assert returned_ids == expected_ids
+
+def test_replay_same_timestamp_latest_ten_is_deterministic(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    reference_time = utcnow_naive()
+    same_time = reference_time - timedelta(hours=2)
+
+    with SessionLocal() as db:
+        for i in range(12):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"replay-deterministic-ip-{i}",
+                    country_code="EE" if i < 2 else "FI",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"replay-deterministic-trace-{i}",
+                    idempotency_key=f"replay-deterministic-idem-{i}",
+                    request_fingerprint=f"replay-deterministic-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=same_time,
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(
+        client,
+        token,
+        ip_address="current-ip",
+        country_code="EE",
+    )
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.workflow_version = None
+        log_id = log.id
+        db.commit()
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200, replay.json()
+
+    body = replay.json()
+
+    assert "geo_change" in body["replayed"]["risk_signals"]
