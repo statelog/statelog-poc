@@ -2981,3 +2981,78 @@ def test_load_risk_history_deduplicates_overlapping_logs(client):
         ]
 
         assert len(matching) == 1
+
+def test_load_risk_history_excludes_log_at_before_boundary(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    before = utcnow_naive()
+
+    with SessionLocal() as db:
+        older = RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="boundary-older-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id="boundary-older-trace",
+            idempotency_key="boundary-older-idem",
+            request_fingerprint="boundary-older-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=before - timedelta(seconds=1),
+        )
+
+        boundary = RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="boundary-exact-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id="boundary-exact-trace",
+            idempotency_key="boundary-exact-idem",
+            request_fingerprint="boundary-exact-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=before,
+        )
+
+        db.add_all([older, boundary])
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            before=before,
+        )
+
+        trace_ids = {item.trace_id for item in history}
+
+        assert "boundary-older-trace" in trace_ids
+        assert "boundary-exact-trace" not in trace_ids
