@@ -559,3 +559,57 @@ def test_risk_engine_result_is_independent_of_history_input_order():
     )
 
     assert reversed_order == forward
+
+def test_risk_engine_is_deterministic_when_logs_share_same_timestamp():
+    now = utcnow_naive()
+    same_time = now - timedelta(minutes=5)
+
+    logs = []
+
+    for i in range(6):
+        logs.append(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="current-ip" if i == 0 else f"other-ip-{i}",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                policy_matched=False,
+                policy_name=None,
+                trace_id=f"same-time-trace-{i}",
+                idempotency_key=f"same-time-idem-{i}",
+                request_fingerprint=f"same-time-fingerprint-{i}",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=same_time,
+            )
+        )
+
+    engine = RiskEngine()
+
+    forward = engine.evaluate(
+        request_type="access",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    reversed_order = engine.evaluate(
+        request_type="access",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=list(reversed(logs)),
+        now=now,
+    )
+
+    assert forward == reversed_order

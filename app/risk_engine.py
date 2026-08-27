@@ -38,7 +38,14 @@ class RiskEngine:
     ) -> RiskDecision:
         score = 0
         reasons: list[str] = []
-        logs = sorted(list(historical_logs), key=lambda item: item.created_at)
+        logs = sorted(
+            list(historical_logs),
+            key=lambda item: (
+                item.created_at,
+                item.id if item.id is not None else 0,
+                item.trace_id or "",
+            ),
+        )
         now = now or utcnow_naive()
 
         recent_failures = [l for l in logs if (now - l.created_at) <= timedelta(minutes=15) and not l.allowed]
