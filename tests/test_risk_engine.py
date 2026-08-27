@@ -508,3 +508,54 @@ def test_trust_score_clamps_to_zero_when_risk_exceeds_one_hundred():
     assert decision.risk_score > 100
     assert decision.allow is False
     assert decision.trust_score == 0
+
+def test_risk_engine_result_is_independent_of_history_input_order():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"order-ip-{i}",
+            country_code="EE" if i == 0 else "FI",
+            request_type="access",
+            allowed=False if i < 3 else True,
+            risk_score=80 if i < 3 else 0,
+            reason="previous_denial" if i < 3 else "allowed",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=f"order-trace-{i}",
+            idempotency_key=f"order-idem-{i}",
+            request_fingerprint=f"order-fingerprint-{i}",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(minutes=5 - i),
+        )
+        for i in range(5)
+    ]
+
+    engine = RiskEngine()
+
+    forward = engine.evaluate(
+        request_type="access",
+        device_id="new-device",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    reversed_order = engine.evaluate(
+        request_type="access",
+        device_id="new-device",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=list(reversed(logs)),
+        now=now,
+    )
+
+    assert reversed_order == forward
