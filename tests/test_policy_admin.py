@@ -2854,3 +2854,77 @@ def test_replay_includes_transfers_exactly_one_hour_old(client):
     body = replay.json()
 
     assert "transfer_velocity" in body["replayed"]["risk_signals"]
+
+def test_replay_includes_old_log_when_in_latest_ten(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="old-latest-ten-ip",
+                country_code="FI",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="old-latest-ten-trace",
+                idempotency_key="old-latest-ten-idem",
+                request_fingerprint="old-latest-ten-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(hours=2),
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(
+        client,
+        token,
+        ip_address="10.10.10.99",
+        country_code="FI",
+    )
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.created_at = now
+        log.workflow_version = None
+        log_id = log.id
+        db.commit()
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200, replay.json()
+
+    body = replay.json()
+
+    assert "new_ip" in body["replayed"]["risk_signals"]
