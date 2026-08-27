@@ -917,7 +917,10 @@ def load_risk_history(
                 *conditions,
                 RequestLog.created_at >= one_hour_ago,
             )
-            .order_by(desc(RequestLog.created_at))
+            .order_by(
+                desc(RequestLog.created_at),
+                desc(RequestLog.id),
+            )
         )
     )
 
@@ -925,7 +928,10 @@ def load_risk_history(
         db.scalars(
             select(RequestLog)
             .where(*conditions)
-            .order_by(desc(RequestLog.created_at))
+            .order_by(
+                desc(RequestLog.created_at),
+                desc(RequestLog.id),
+            )
             .limit(10)
         )
     )

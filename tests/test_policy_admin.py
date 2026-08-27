@@ -3252,3 +3252,61 @@ def test_load_risk_history_isolates_tenant_and_right(client):
         assert "history-isolation-target" in trace_ids
         assert "history-isolation-other-right" not in trace_ids
         assert "history-isolation-other-tenant" not in trace_ids
+
+def test_load_risk_history_same_timestamp_latest_ten_is_deterministic(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    reference_time = utcnow_naive()
+    same_time = reference_time - timedelta(hours=2)
+
+    with SessionLocal() as db:
+        inserted = []
+
+        for i in range(12):
+            log = RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=f"same-time-latest-ip-{i}",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id=f"same-time-latest-trace-{i}",
+                idempotency_key=f"same-time-latest-idem-{i}",
+                request_fingerprint=f"same-time-latest-fingerprint-{i}",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=same_time,
+            )
+            db.add(log)
+            inserted.append(log)
+
+        db.commit()
+
+        inserted_ids = sorted(log.id for log in inserted)
+        expected_ids = set(inserted_ids[-10:])
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            before=reference_time,
+        )
+
+        returned_ids = {log.id for log in history if log.id in inserted_ids}
+
+    assert returned_ids == expected_ids
