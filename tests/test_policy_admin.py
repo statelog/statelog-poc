@@ -3106,3 +3106,80 @@ def test_load_risk_history_includes_log_exactly_one_hour_old(client):
         trace_ids = {item.trace_id for item in history}
 
         assert "hour-boundary-trace" in trace_ids
+
+def test_load_risk_history_excludes_old_log_outside_latest_ten(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    reference_time = utcnow_naive()
+
+    with SessionLocal() as db:
+        old_log = RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="outside-latest-ten-old-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id="outside-latest-ten-old-trace",
+            idempotency_key="outside-latest-ten-old-idem",
+            request_fingerprint="outside-latest-ten-old-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=reference_time - timedelta(hours=2),
+        )
+        db.add(old_log)
+
+        for i in range(10):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"outside-latest-ten-new-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"outside-latest-ten-new-trace-{i}",
+                    idempotency_key=f"outside-latest-ten-new-idem-{i}",
+                    request_fingerprint=f"outside-latest-ten-new-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=reference_time - timedelta(minutes=i + 1),
+                )
+            )
+
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            before=reference_time,
+        )
+
+        trace_ids = {item.trace_id for item in history}
+
+        assert "outside-latest-ten-old-trace" not in trace_ids
