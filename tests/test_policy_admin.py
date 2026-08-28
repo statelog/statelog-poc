@@ -4274,3 +4274,39 @@ def test_replay_does_not_load_workflow_version_from_other_tenant(client):
 
     assert replay.status_code == 409
     assert replay.json()["detail"] == "historical_workflow_version_not_found"
+
+def test_replay_rejects_request_log_with_unknown_tenant(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        log.workflow_version = None
+        log.policy_id = None
+        log.policy_version = None
+        log.tenant_id = "tenant-does-not-exist"
+
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 409
+    assert replay.json()["detail"] == "historical_tenant_not_found"

@@ -1450,6 +1450,12 @@ def replay_audit_log(
 
     if log is None:
         raise HTTPException(status_code=404, detail="request_log_not_found")
+    
+    if db.get(Tenant, log.tenant_id) is None:
+        raise HTTPException(
+            status_code=409,
+            detail="historical_tenant_not_found",
+        )
 
     workflow = None
     if log.workflow_version is not None:
