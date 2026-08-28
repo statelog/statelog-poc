@@ -509,3 +509,63 @@ def test_policy_combines_dynamic_business_rules():
 
     assert invalid_request.matched is False
     assert invalid_request.reason == "no_policy_match"
+
+def test_policy_dynamic_rule_boundaries():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="boundary-rule",
+                effect="deny",
+                priority=1,
+                request_types=("ownership_transfer",),
+                max_transaction_amount=10000,
+                allowed_start_hour=8,
+                allowed_end_hour=18,
+            )
+        ]
+    )
+
+    at_start = engine.evaluate(
+        request_type="ownership_transfer",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={
+            "transaction_amount": 10000,
+            "hour": 8,
+        },
+    )
+
+    at_end = engine.evaluate(
+        request_type="ownership_transfer",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={
+            "transaction_amount": 10000,
+            "hour": 18,
+        },
+    )
+
+    above_amount = engine.evaluate(
+        request_type="ownership_transfer",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={
+            "transaction_amount": 10000.01,
+            "hour": 8,
+        },
+    )
+
+    assert at_start.matched is True
+    assert at_start.allow is False
+
+    assert at_end.matched is False
+    assert at_end.reason == "no_policy_match"
+
+    assert above_amount.matched is False
+    assert above_amount.reason == "no_policy_match"
