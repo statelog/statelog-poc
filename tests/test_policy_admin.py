@@ -4023,3 +4023,45 @@ def test_admin_policy_simulation_does_not_modify_active_configuration(client):
 
     assert policy_after == policy_before
     assert workflow_after == workflow_before
+
+def test_admin_policy_simulation_isolates_tenant_policies(client):
+    ensure_setup(client)
+
+    create = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "name": "other-tenant-deny",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+        },
+    )
+
+    assert create.status_code == 200
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 90,
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["matched"] is False
+    assert body["allow"] is None
+    assert body["reason"] == "no_policy_match"
+    assert body["policy_name"] is None
