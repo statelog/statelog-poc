@@ -49,6 +49,8 @@ class PolicyEngine:
                 policy.priority,
                 0 if policy.effect.lower() == "deny" else 1,
                 policy.name,
+                policy.policy_id if policy.policy_id is not None else 0,
+                policy.version,
             ),
     )
     def evaluate(
