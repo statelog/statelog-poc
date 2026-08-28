@@ -1335,7 +1335,11 @@ def tenant_dashboard(tenant_id: str, request: Request, db: Session = Depends(get
         .limit(200)
     )
 )
-    return templates.TemplateResponse("tenant.html", {"request": request, "tenant": tenant, "rights": rights, "logs": logs})
+    return templates.TemplateResponse(
+        request,
+        "tenant.html",
+        {"tenant": tenant, "rights": rights, "logs": logs},
+    )
 
 def build_audit_log_query(
     tenant_id: str,
