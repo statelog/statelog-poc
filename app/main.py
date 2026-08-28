@@ -1409,7 +1409,10 @@ def get_audit_logs(
 
     query = (
         query
-        .order_by(RequestLog.created_at.desc())
+        .order_by(
+            RequestLog.created_at.desc(),
+            RequestLog.id.desc(),
+    )
         .offset(offset)
         .limit(limit)
     )

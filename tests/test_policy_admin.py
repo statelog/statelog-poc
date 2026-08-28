@@ -4310,3 +4310,63 @@ def test_replay_rejects_request_log_with_unknown_tenant(client):
 
     assert replay.status_code == 409
     assert replay.json()["detail"] == "historical_tenant_not_found"
+
+def test_audit_logs_same_timestamp_order_by_id_desc(client):
+    ensure_setup(client)
+
+    first_token = issue_token(client).json()["token"]
+    second_token = issue_token(client).json()["token"]
+
+    first = access_request(client, first_token)
+    second = access_request(
+        client,
+        second_token,
+        ip_address="10.0.0.11",
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    from datetime import datetime
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        first_log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=first.json()["trace_id"])
+            .one()
+        )
+        second_log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=second.json()["trace_id"])
+            .one()
+        )
+
+        same_time = datetime(2026, 1, 1, 12, 0, 0)
+
+        first_log.created_at = same_time
+        second_log.created_at = same_time
+        db.commit()
+
+        first_id = first_log.id
+        second_id = second_log.id
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": 500,
+        },
+    )
+
+    assert response.status_code == 200
+
+    ids = [
+        item["id"]
+        for item in response.json()
+        if item["id"] in {first_id, second_id}
+    ]
+
+    assert ids == [max(first_id, second_id), min(first_id, second_id)]
