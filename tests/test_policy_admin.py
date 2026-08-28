@@ -982,6 +982,8 @@ def test_admin_can_simulate_matching_policy(client):
     assert body["allow"] is False
     assert body["policy_name"] == "simulation-api-deny"
     assert body["evaluated_policies"] >= 1
+    assert body["policy_version"] == 1
+    assert body["reason"] == "policy_deny:simulation-api-deny"
 
 def test_admin_policy_simulation_reports_no_match(client):
     ensure_setup(client)
