@@ -4065,3 +4065,53 @@ def test_admin_policy_simulation_isolates_tenant_policies(client):
     assert body["allow"] is None
     assert body["reason"] == "no_policy_match"
     assert body["policy_name"] is None
+
+def test_list_policies_orders_equal_priority_by_id(client):
+    ensure_setup(client)
+
+    first = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "equal-priority-first",
+            "effect": "allow",
+            "priority": 42,
+        },
+    )
+    second = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "equal-priority-second",
+            "effect": "deny",
+            "priority": 42,
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    response = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 200
+
+    policies = [
+        policy
+        for policy in response.json()
+        if policy["name"] in {
+            "equal-priority-first",
+            "equal-priority-second",
+        }
+    ]
+
+    assert [policy["name"] for policy in policies] == [
+        "equal-priority-first",
+        "equal-priority-second",
+    ]
+    assert policies[0]["id"] < policies[1]["id"]
