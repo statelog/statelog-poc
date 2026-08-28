@@ -45,9 +45,11 @@ class PolicyEngine:
     def __init__(self, policies: Iterable[Policy] | None = None) -> None:
         self.policies = sorted(
             list(policies or []),
-            key=lambda policy: policy.priority,
-        )
-
+            key=lambda policy: (
+                policy.priority,
+                0 if policy.effect.lower() == "deny" else 1,
+            ),
+    )
     def evaluate(
         self,
         *,

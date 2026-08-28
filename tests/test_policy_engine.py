@@ -569,3 +569,40 @@ def test_policy_dynamic_rule_boundaries():
 
     assert above_amount.matched is False
     assert above_amount.reason == "no_policy_match"
+
+def test_equal_priority_deny_wins_independent_of_input_order():
+    allow_policy = Policy(
+        name="equal-priority-allow",
+        effect="allow",
+        priority=10,
+        request_types=("access",),
+    )
+    deny_policy = Policy(
+        name="equal-priority-deny",
+        effect="deny",
+        priority=10,
+        request_types=("access",),
+    )
+
+    def evaluate(policies):
+        engine = PolicyEngine(policies)
+        return engine.evaluate(
+            request_type="access",
+            device_id="device-1",
+            country_code="EE",
+            risk_score=10,
+            trust_score=90,
+        )
+
+    allow_first = evaluate([allow_policy, deny_policy])
+    deny_first = evaluate([deny_policy, allow_policy])
+
+    assert allow_first.matched is True
+    assert allow_first.allow is False
+    assert allow_first.policy_name == "equal-priority-deny"
+
+    assert deny_first.matched is True
+    assert deny_first.allow is False
+    assert deny_first.policy_name == "equal-priority-deny"
+
+    assert allow_first == deny_first
