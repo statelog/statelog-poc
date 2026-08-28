@@ -3865,3 +3865,47 @@ def test_admin_policy_simulation_returns_404_for_unknown_tenant(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "tenant_not_found"
+
+def test_admin_policy_simulation_has_no_persistence_side_effects(client):
+    ensure_setup(client)
+
+    from app.database import SessionLocal
+    from app.models import (
+        OutboxEvent,
+        PolicyHistory,
+        RequestLog,
+        WorkflowConfigHistory,
+    )
+
+    with SessionLocal() as db:
+        before = {
+            "request_logs": db.query(RequestLog).count(),
+            "outbox_events": db.query(OutboxEvent).count(),
+            "policy_history": db.query(PolicyHistory).count(),
+            "workflow_history": db.query(WorkflowConfigHistory).count(),
+        }
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 90,
+        },
+    )
+
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        after = {
+            "request_logs": db.query(RequestLog).count(),
+            "outbox_events": db.query(OutboxEvent).count(),
+            "policy_history": db.query(PolicyHistory).count(),
+            "workflow_history": db.query(WorkflowConfigHistory).count(),
+        }
+
+    assert after == before
