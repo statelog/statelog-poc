@@ -1324,7 +1324,17 @@ def tenant_dashboard(tenant_id: str, request: Request, db: Session = Depends(get
     if not tenant:
         raise HTTPException(status_code=404, detail="tenant_not_found")
     rights = list(db.scalars(select(AccessRight).where(AccessRight.tenant_id == tenant_id).order_by(AccessRight.created_at.desc())))
-    logs = list(db.scalars(select(RequestLog).where(RequestLog.tenant_id == tenant_id).order_by(RequestLog.created_at.desc()).limit(20)))
+    logs = list(
+    db.scalars(
+        select(RequestLog)
+        .where(RequestLog.tenant_id == tenant_id)
+        .order_by(
+            RequestLog.created_at.desc(),
+            RequestLog.id.desc(),
+        )
+        .limit(200)
+    )
+)
     return templates.TemplateResponse("tenant.html", {"request": request, "tenant": tenant, "rights": rights, "logs": logs})
 
 def build_audit_log_query(

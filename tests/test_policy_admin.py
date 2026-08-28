@@ -4370,3 +4370,61 @@ def test_audit_logs_same_timestamp_order_by_id_desc(client):
     ]
 
     assert ids == [max(first_id, second_id), min(first_id, second_id)]
+
+def test_tenant_dashboard_same_timestamp_orders_logs_by_id_desc(client):
+    ensure_setup(client)
+
+    from tests.test_smoke import HEADERS
+
+    first_token = issue_token(client).json()["token"]
+    second_token = issue_token(client).json()["token"]
+
+    first = access_request(client, first_token)
+    second = access_request(
+        client,
+        second_token,
+        ip_address="10.0.0.11",
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    from datetime import datetime
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        first_log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=first.json()["trace_id"])
+            .one()
+        )
+        second_log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=second.json()["trace_id"])
+            .one()
+        )
+
+        same_time = datetime(2026, 1, 1, 12, 0, 0)
+
+        first_log.created_at = same_time
+        second_log.created_at = same_time
+        first_log.reason = "dashboard-first-log"
+        second_log.reason = "dashboard-second-log"
+
+        db.commit()
+
+        assert second_log.id > first_log.id
+
+    response = client.get(
+        "/tenant/tenant-demo",
+        headers=HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    html = response.text
+
+    assert "dashboard-first-log" in html
+    assert "dashboard-second-log" in html
+    assert html.index("dashboard-second-log") < html.index("dashboard-first-log")
