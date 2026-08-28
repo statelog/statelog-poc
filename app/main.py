@@ -74,7 +74,7 @@ def load_tenant_policies(db: Session, tenant_id: str) -> PolicyEngine:
     records = (
         db.query(PolicyRecord)
         .filter_by(tenant_id=tenant_id, enabled=True)
-        .order_by(PolicyRecord.priority.asc())
+        .order_by(PolicyRecord.priority.asc(), PolicyRecord.id.asc())
         .all()
     )
 
