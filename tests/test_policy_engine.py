@@ -606,3 +606,38 @@ def test_equal_priority_deny_wins_independent_of_input_order():
     assert deny_first.policy_name == "equal-priority-deny"
 
     assert allow_first == deny_first
+
+def test_equal_priority_equal_effect_is_independent_of_input_order():
+    alpha = Policy(
+        name="alpha-deny",
+        effect="deny",
+        priority=10,
+        request_types=("access",),
+    )
+    beta = Policy(
+        name="beta-deny",
+        effect="deny",
+        priority=10,
+        request_types=("access",),
+    )
+
+    def evaluate(policies):
+        engine = PolicyEngine(policies)
+        return engine.evaluate(
+            request_type="access",
+            device_id="device-1",
+            country_code="EE",
+            risk_score=10,
+            trust_score=90,
+        )
+
+    alpha_first = evaluate([alpha, beta])
+    beta_first = evaluate([beta, alpha])
+
+    assert alpha_first.matched is True
+    assert beta_first.matched is True
+
+    assert alpha_first.policy_name == "alpha-deny"
+    assert beta_first.policy_name == "alpha-deny"
+
+    assert alpha_first == beta_first

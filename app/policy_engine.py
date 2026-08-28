@@ -48,6 +48,7 @@ class PolicyEngine:
             key=lambda policy: (
                 policy.priority,
                 0 if policy.effect.lower() == "deny" else 1,
+                policy.name,
             ),
     )
     def evaluate(
