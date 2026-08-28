@@ -691,3 +691,54 @@ def test_workflow_config_multiple_versions_remain_replayable(client):
     assert version_3.include_risk_step is True
     assert version_3.include_policy_step is False
     assert version_3.execution_mode == "risk_first"
+
+def test_load_workflow_config_version_isolates_tenants(client):
+    ensure_setup(client)
+
+    created = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert created.status_code == 200
+
+    updated = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": False,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert updated.status_code == 200
+
+    from app.database import SessionLocal
+    from app.main import load_workflow_config_version
+
+    with SessionLocal() as db:
+        correct_tenant = load_workflow_config_version(
+            db,
+            "tenant-demo",
+            1,
+        )
+
+        wrong_tenant = load_workflow_config_version(
+            db,
+            "tenant-other",
+            1,
+        )
+
+    assert correct_tenant is not None
+    assert correct_tenant.include_risk_step is True
+    assert correct_tenant.include_policy_step is True
+
+    assert wrong_tenant is None
