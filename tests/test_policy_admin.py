@@ -3848,3 +3848,20 @@ def test_admin_policy_simulation_supports_business_hours(client):
     assert body["matched"] is True
     assert body["allow"] is False
     assert body["policy_name"] == "simulation-business-hours"
+
+def test_admin_policy_simulation_returns_404_for_unknown_tenant(client):
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-does-not-exist",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 90,
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "tenant_not_found"
