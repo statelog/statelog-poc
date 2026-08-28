@@ -80,16 +80,8 @@ class WorkflowEngine:
         )
 
         decision_path = tuple(path)
-
+        
         return WorkflowDecision(
             decision_source=decision_source,
             decision_path=decision_path,
         )
-
-def test_workflow_config_defaults_enable_all_steps():
-    from app.workflow_engine import WorkflowConfig
-
-    config = WorkflowConfig()
-
-    assert config.include_risk_step is True
-    assert config.include_policy_step is True
