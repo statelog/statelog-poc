@@ -1031,6 +1031,35 @@ def test_admin_policy_simulation_reports_no_match(client):
     assert body["policy_version"] is None
     assert body["evaluated_policies"] >= 1
 
+def test_admin_policy_simulation_does_not_create_request_log(client):
+    ensure_setup(client)
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        before_count = db.query(RequestLog).count()
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 90,
+        },
+    )
+
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        after_count = db.query(RequestLog).count()
+
+    assert after_count == before_count
+
 def test_admin_dynamic_business_rule_create_list_update_flow(client):
     ensure_setup(client)
 
