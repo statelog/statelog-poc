@@ -85,6 +85,8 @@ class PolicySimulationRequest(BaseModel):
     country_code: str
     risk_score: int
     trust_score: Optional[int] = None
+    transaction_amount: Optional[float] = None
+    hour: Optional[int] = None
 
 class PolicyCreate(BaseModel):
     tenant_id: str

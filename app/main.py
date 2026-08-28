@@ -498,6 +498,10 @@ def simulate_policy(
         country_code=payload.country_code,
         risk_score=payload.risk_score,
         trust_score=payload.trust_score,
+        context={
+            "transaction_amount": payload.transaction_amount,
+            "hour": payload.hour,
+        },
     )
 
     return {

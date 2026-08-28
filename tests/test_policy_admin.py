@@ -1060,6 +1060,49 @@ def test_admin_policy_simulation_does_not_create_request_log(client):
 
     assert after_count == before_count
 
+def test_admin_policy_simulation_supports_transaction_amount(client):
+    ensure_setup(client)
+
+    create = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "simulation-transaction-limit",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["ownership_transfer"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_transaction_amount": 10000,
+            "enabled": True,
+        },
+    )
+
+    assert create.status_code == 200
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "ownership_transfer",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 90,
+            "transaction_amount": 5000,
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["matched"] is True
+    assert body["allow"] is False
+    assert body["policy_name"] == "simulation-transaction-limit"
+
 def test_admin_dynamic_business_rule_create_list_update_flow(client):
     ensure_setup(client)
 
@@ -3761,3 +3804,47 @@ def test_load_risk_history_without_before_uses_current_one_hour_window(client):
 
     assert "no-before-recent-0" in trace_ids
     assert "no-before-old" not in trace_ids
+
+def test_admin_policy_simulation_supports_business_hours(client):
+    ensure_setup(client)
+
+    create = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "simulation-business-hours",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "allowed_start_hour": 8,
+            "allowed_end_hour": 18,
+            "enabled": True,
+        },
+    )
+
+    assert create.status_code == 200
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 90,
+            "hour": 12,
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["matched"] is True
+    assert body["allow"] is False
+    assert body["policy_name"] == "simulation-business-hours"
