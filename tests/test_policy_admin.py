@@ -3909,3 +3909,117 @@ def test_admin_policy_simulation_has_no_persistence_side_effects(client):
         }
 
     assert after == before
+
+def test_admin_policy_simulation_does_not_modify_active_configuration(client):
+    ensure_setup(client)
+
+    create = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "simulation-immutable-policy",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": 50,
+            "min_trust_score": 50,
+            "enabled": True,
+        },
+    )
+
+    assert create.status_code == 200
+
+    from app.database import SessionLocal
+    from app.models import PolicyRecord, WorkflowConfigRecord
+
+    with SessionLocal() as db:
+        policy = (
+            db.query(PolicyRecord)
+            .filter_by(
+                tenant_id="tenant-demo",
+                name="simulation-immutable-policy",
+            )
+            .first()
+        )
+        workflow = db.get(WorkflowConfigRecord, "tenant-demo")
+
+        assert policy is not None
+
+        policy_before = {
+            "id": policy.id,
+            "name": policy.name,
+            "effect": policy.effect,
+            "priority": policy.priority,
+            "version": policy.version,
+            "request_types": policy.request_types,
+            "countries": policy.countries,
+            "device_ids": policy.device_ids,
+            "max_risk_score": policy.max_risk_score,
+            "min_trust_score": policy.min_trust_score,
+            "max_transaction_amount": policy.max_transaction_amount,
+            "allowed_start_hour": policy.allowed_start_hour,
+            "allowed_end_hour": policy.allowed_end_hour,
+            "enabled": policy.enabled,
+            "updated_at": policy.updated_at,
+        }
+
+        workflow_before = None
+        if workflow is not None:
+            workflow_before = {
+                "version": workflow.version,
+                "include_risk_step": workflow.include_risk_step,
+                "include_policy_step": workflow.include_policy_step,
+                "execution_mode": workflow.execution_mode,
+            }
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 90,
+        },
+    )
+
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        policy = db.get(PolicyRecord, policy_before["id"])
+        workflow = db.get(WorkflowConfigRecord, "tenant-demo")
+
+        policy_after = {
+            "id": policy.id,
+            "name": policy.name,
+            "effect": policy.effect,
+            "priority": policy.priority,
+            "version": policy.version,
+            "request_types": policy.request_types,
+            "countries": policy.countries,
+            "device_ids": policy.device_ids,
+            "max_risk_score": policy.max_risk_score,
+            "min_trust_score": policy.min_trust_score,
+            "max_transaction_amount": policy.max_transaction_amount,
+            "allowed_start_hour": policy.allowed_start_hour,
+            "allowed_end_hour": policy.allowed_end_hour,
+            "enabled": policy.enabled,
+            "updated_at": policy.updated_at,
+        }
+
+        workflow_after = None
+        if workflow is not None:
+            workflow_after = {
+                "version": workflow.version,
+                "include_risk_step": workflow.include_risk_step,
+                "include_policy_step": workflow.include_policy_step,
+                "execution_mode": workflow.execution_mode,
+            }
+
+    assert policy_after == policy_before
+    assert workflow_after == workflow_before
