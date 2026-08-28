@@ -4115,3 +4115,58 @@ def test_list_policies_orders_equal_priority_by_id(client):
         "equal-priority-second",
     ]
     assert policies[0]["id"] < policies[1]["id"]
+
+def test_load_policy_version_isolates_tenants(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "tenant-isolated-history",
+            "effect": "deny",
+            "priority": 10,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "priority": 5,
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+    from app.database import SessionLocal
+    from app.main import load_policy_version
+
+    with SessionLocal() as db:
+        correct_tenant = load_policy_version(
+            db,
+            "tenant-demo",
+            policy_id,
+            1,
+        )
+
+        wrong_tenant = load_policy_version(
+            db,
+            "tenant-other",
+            policy_id,
+            1,
+        )
+
+    assert correct_tenant is not None
+    assert correct_tenant.policy_id == policy_id
+    assert correct_tenant.version == 1
+
+    assert wrong_tenant is None
