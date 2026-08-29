@@ -3683,3 +3683,422 @@ def test_live_new_ip_ignores_matching_ip_from_other_right(client):
     body = response.json()
 
     assert "new_ip" in body["risk_signals"]
+
+def test_live_new_device_ignores_matching_device_from_other_tenant(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="history-other-device",
+                user_id="user-123",
+                ip_hash="device-isolation-current-tenant",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="device-isolation-current-tenant",
+                idempotency_key="device-isolation-current-tenant-idem",
+                request_fingerprint="device-isolation-current-tenant-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=4),
+            )
+        )
+
+        db.add(
+            RequestLog(
+                tenant_id="tenant-other",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="device-isolation-other-tenant",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="device-isolation-other-tenant",
+                idempotency_key="device-isolation-other-tenant-idem",
+                request_fingerprint="device-isolation-other-tenant-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=5),
+            )
+        )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_device" in body["risk_signals"]
+
+
+def test_live_new_device_ignores_matching_device_from_other_right(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="history-other-device",
+                user_id="user-123",
+                ip_hash="device-isolation-current-right",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="device-isolation-current-right",
+                idempotency_key="device-isolation-current-right-idem",
+                request_fingerprint="device-isolation-current-right-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=4),
+            )
+        )
+
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-other",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="device-isolation-other-right",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="device-isolation-other-right",
+                idempotency_key="device-isolation-other-right-idem",
+                request_fingerprint="device-isolation-other-right-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=5),
+            )
+        )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_device" in body["risk_signals"]
+
+
+def test_live_new_device_ignores_matching_device_from_future_log(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="history-other-device",
+                user_id="user-123",
+                ip_hash="device-future-valid-past",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="device-future-valid-past",
+                idempotency_key="device-future-valid-past-idem",
+                request_fingerprint="device-future-valid-past-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=5),
+            )
+        )
+
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="device-future-match",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="device-future-match",
+                idempotency_key="device-future-match-idem",
+                request_fingerprint="device-future-match-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now + timedelta(minutes=10),
+            )
+        )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_device" in body["risk_signals"]
+
+def test_live_new_device_future_logs_do_not_pressure_latest_five(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # Current device was genuinely seen in the past.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="device-future-pressure-valid",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="device-future-pressure-valid",
+                idempotency_key="device-future-pressure-valid-idem",
+                request_fingerprint="device-future-pressure-valid-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=5),
+            )
+        )
+
+        for i in range(10):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id=f"future-device-{i}",
+                    user_id="user-123",
+                    ip_hash=f"device-future-pressure-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"device-future-pressure-{i}",
+                    idempotency_key=f"device-future-pressure-idem-{i}",
+                    request_fingerprint=f"device-future-pressure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now + timedelta(minutes=10 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_device" not in body["risk_signals"]
+
+
+def test_live_new_device_filters_other_scope_before_latest_five_limit(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # Matching device belongs to the correct tenant/right.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="device-scope-pressure-valid",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="device-scope-pressure-valid",
+                idempotency_key="device-scope-pressure-valid-idem",
+                request_fingerprint="device-scope-pressure-valid-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=10),
+            )
+        )
+
+        for i in range(6):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-other",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id=f"other-tenant-device-{i}",
+                    user_id="user-123",
+                    ip_hash=f"other-tenant-device-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"other-tenant-device-pressure-{i}",
+                    idempotency_key=f"other-tenant-device-pressure-idem-{i}",
+                    request_fingerprint=f"other-tenant-device-pressure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5),
+                )
+            )
+
+        for i in range(6):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-other",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id=f"other-right-device-{i}",
+                    user_id="user-123",
+                    ip_hash=f"other-right-device-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"other-right-device-pressure-{i}",
+                    idempotency_key=f"other-right-device-pressure-idem-{i}",
+                    request_fingerprint=f"other-right-device-pressure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=4),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_device" not in body["risk_signals"]
