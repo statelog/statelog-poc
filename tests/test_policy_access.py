@@ -2882,3 +2882,245 @@ def test_live_new_device_includes_device_at_exactly_fifth_most_recent_log(client
     body = response.json()
 
     assert "new_device" not in body["risk_signals"]
+
+def test_live_new_ip_excludes_ip_at_sixth_most_recent_log(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    matching_ip_hash = pseudonymize_ip("10.0.0.10")
+
+    with SessionLocal() as db:
+        # Matching IP is the 6th most recent log, so it must be ignored.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=matching_ip_hash,
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="new-ip-sixth-match",
+                idempotency_key="new-ip-sixth-match-idem",
+                request_fingerprint="new-ip-sixth-match-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=6),
+            )
+        )
+
+        for i in range(5):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"new-ip-sixth-other-{i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"new-ip-sixth-other-{i}",
+                    idempotency_key=f"new-ip-sixth-other-idem-{i}",
+                    request_fingerprint=f"new-ip-sixth-other-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5 - i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_ip" in body["risk_signals"]
+
+
+def test_live_new_device_excludes_device_at_sixth_most_recent_log(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # Matching device is the 6th most recent log.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="new-device-sixth-match-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="new-device-sixth-match",
+                idempotency_key="new-device-sixth-match-idem",
+                request_fingerprint="new-device-sixth-match-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=6),
+            )
+        )
+
+        for i in range(5):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id=f"sixth-other-device-{i}",
+                    user_id="user-123",
+                    ip_hash=f"new-device-sixth-other-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"new-device-sixth-other-{i}",
+                    idempotency_key=f"new-device-sixth-other-idem-{i}",
+                    request_fingerprint=f"new-device-sixth-other-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5 - i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_device" in body["risk_signals"]
+
+
+def test_live_geo_change_future_logs_do_not_pressure_latest_ten(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # Valid past EE history must remain visible.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="geo-future-pressure-valid-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="geo-future-pressure-valid",
+                idempotency_key="geo-future-pressure-valid-idem",
+                request_fingerprint="geo-future-pressure-valid-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=5),
+            )
+        )
+
+        # Future rows must be filtered before latest-ten selection.
+        for i in range(15):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"geo-future-pressure-ip-{i}",
+                    country_code="FI",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"geo-future-pressure-{i}",
+                    idempotency_key=f"geo-future-pressure-idem-{i}",
+                    request_fingerprint=f"geo-future-pressure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now + timedelta(minutes=5 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "geo_change" not in body["risk_signals"]
