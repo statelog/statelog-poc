@@ -2718,3 +2718,86 @@ def test_live_geo_change_includes_country_at_exactly_tenth_most_recent_log(clien
     body = response.json()
 
     assert "geo_change" not in body["risk_signals"]
+
+def test_live_new_ip_includes_ip_at_exactly_fifth_most_recent_log(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    matching_ip_hash = pseudonymize_ip("10.0.0.10")
+
+    with SessionLocal() as db:
+        # Matching IP is exactly the 5th most recent log.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=matching_ip_hash,
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="new-ip-fifth-match",
+                idempotency_key="new-ip-fifth-match-idem",
+                request_fingerprint="new-ip-fifth-match-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=5),
+            )
+        )
+
+        # Four newer logs with different IPs.
+        for i in range(4):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"new-ip-fifth-other-{i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"new-ip-fifth-other-{i}",
+                    idempotency_key=f"new-ip-fifth-other-idem-{i}",
+                    request_fingerprint=f"new-ip-fifth-other-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=4 - i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "new_ip" not in body["risk_signals"]
