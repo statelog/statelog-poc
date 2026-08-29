@@ -1221,3 +1221,85 @@ def test_live_access_transfer_velocity_survives_high_traffic_history(client):
     body = response.json()
 
     assert "transfer_velocity" in body["risk_signals"]
+
+def test_live_access_failure_burst_survives_high_traffic_history(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # Three failures still inside the 15-minute failure-burst window.
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"high-traffic-failure-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80,
+                    reason="previous_denial",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"high-traffic-failure-trace-{i}",
+                    idempotency_key=f"high-traffic-failure-idem-{i}",
+                    request_fingerprint=f"high-traffic-failure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=14, seconds=i),
+                )
+            )
+
+        # More than 50 newer successful requests.
+        for i in range(60):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"high-traffic-success-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"high-traffic-success-trace-{i}",
+                    idempotency_key=f"high-traffic-success-idem-{i}",
+                    request_fingerprint=f"high-traffic-success-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=i % 10),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.10.10.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "failure_burst" in body["risk_signals"]
