@@ -2233,3 +2233,56 @@ def test_live_transfer_velocity_does_not_trigger_with_only_one_recent_transfer(c
 
     assert "transfer_velocity" not in body["risk_signals"]
     assert "sensitive_action" in body["risk_signals"]
+
+def test_live_failure_burst_ignores_failures_from_other_tenant(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-other",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"other-tenant-failure-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80,
+                    reason="previous_denial",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"other-tenant-failure-{i}",
+                    idempotency_key=f"other-tenant-failure-idem-{i}",
+                    request_fingerprint=f"other-tenant-failure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "failure_burst" not in body["risk_signals"]
