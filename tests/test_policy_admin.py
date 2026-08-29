@@ -4488,3 +4488,78 @@ def test_load_risk_history_without_before_excludes_future_logs(client):
 
     assert "no-before-recent" in trace_ids
     assert "no-before-future" not in trace_ids
+
+def test_load_risk_history_filters_future_logs_before_latest_ten_limit(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    def make_log(trace_id, created_at):
+        return RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"{trace_id}-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=trace_id,
+            idempotency_key=f"{trace_id}-idem",
+            request_fingerprint=f"{trace_id}-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=created_at,
+        )
+
+    with SessionLocal() as db:
+        target = make_log(
+            "future-limit-target",
+            now - timedelta(hours=2),
+        )
+        db.add(target)
+
+        for i in range(10):
+            db.add(
+                make_log(
+                    f"future-limit-old-{i}",
+                    now - timedelta(hours=3, minutes=i),
+                )
+            )
+
+        for i in range(12):
+            db.add(
+                make_log(
+                    f"future-limit-future-{i}",
+                    now + timedelta(hours=1, minutes=i),
+                )
+            )
+
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+        )
+
+        trace_ids = {log.trace_id for log in history}
+
+    assert "future-limit-target" in trace_ids
+    assert not any(
+        trace_id.startswith("future-limit-future-")
+        for trace_id in trace_ids
+    )
