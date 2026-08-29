@@ -1135,3 +1135,89 @@ def test_transfer_velocity_survives_more_than_fifty_newer_unrelated_logs(client)
     body = response.json()
 
     assert "transfer_velocity" in body["risk_signals"]
+
+def test_live_access_transfer_velocity_survives_high_traffic_history(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # Two ownership transfers inside the one-hour risk window.
+        for i in range(2):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"high-traffic-transfer-ip-{i}",
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"high-traffic-transfer-trace-{i}",
+                    idempotency_key=f"high-traffic-transfer-idem-{i}",
+                    request_fingerprint=f"high-traffic-transfer-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=50 + i),
+                )
+            )
+
+        # More than 50 newer ordinary access logs.
+        # The old limit(50) implementation would lose the transfers above.
+        for i in range(60):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"high-traffic-access-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"high-traffic-access-trace-{i}",
+                    idempotency_key=f"high-traffic-access-idem-{i}",
+                    request_fingerprint=f"high-traffic-access-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=i % 40),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        new_owner_id="user-456",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "transfer_velocity" in body["risk_signals"]
