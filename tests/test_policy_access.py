@@ -2637,3 +2637,84 @@ def test_live_new_ip_future_logs_do_not_pressure_latest_five(client):
     body = response.json()
 
     assert "new_ip" not in body["risk_signals"]
+
+def test_live_geo_change_includes_country_at_exactly_tenth_most_recent_log(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # EE is exactly the 10th most recent log and must still be included.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="geo-tenth-ee-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="geo-tenth-ee",
+                idempotency_key="geo-tenth-ee-idem",
+                request_fingerprint="geo-tenth-ee-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=10),
+            )
+        )
+
+        # Nine newer logs from another country.
+        for i in range(9):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"geo-tenth-fi-ip-{i}",
+                    country_code="FI",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"geo-tenth-fi-{i}",
+                    idempotency_key=f"geo-tenth-fi-idem-{i}",
+                    request_fingerprint=f"geo-tenth-fi-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=9 - i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "geo_change" not in body["risk_signals"]
