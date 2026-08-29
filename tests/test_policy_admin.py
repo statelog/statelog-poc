@@ -4428,3 +4428,63 @@ def test_tenant_dashboard_same_timestamp_orders_logs_by_id_desc(client):
     assert "dashboard-first-log" in html
     assert "dashboard-second-log" in html
     assert html.index("dashboard-second-log") < html.index("dashboard-first-log")
+
+def test_load_risk_history_without_before_excludes_future_logs(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    def make_log(trace_id, created_at):
+        return RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"{trace_id}-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=trace_id,
+            idempotency_key=f"{trace_id}-idem",
+            request_fingerprint=f"{trace_id}-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=created_at,
+        )
+
+    with SessionLocal() as db:
+        recent = make_log(
+            "no-before-recent",
+            now - timedelta(minutes=5),
+        )
+        future = make_log(
+            "no-before-future",
+            now + timedelta(hours=1),
+        )
+
+        db.add_all([recent, future])
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+        )
+
+        trace_ids = {log.trace_id for log in history}
+
+    assert "no-before-recent" in trace_ids
+    assert "no-before-future" not in trace_ids

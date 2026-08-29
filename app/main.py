@@ -880,6 +880,8 @@ def load_risk_history(
 
     if before is not None:
         conditions.append(RequestLog.created_at < before)
+    else:
+        conditions.append(RequestLog.created_at <= reference_time)
 
     recent_by_time = list(
         db.scalars(
