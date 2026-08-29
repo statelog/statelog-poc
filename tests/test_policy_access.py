@@ -4490,3 +4490,398 @@ def test_live_geo_change_same_timestamp_matching_higher_id_remains_in_latest_ten
     body = response.json()
 
     assert "geo_change" not in body["risk_signals"]
+
+def test_live_combined_risk_score_exactly_seventy_denies(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # 3 failures = 35
+        # unseen device = 15
+        # unseen IP = 10
+        # ownership_transfer without velocity = sensitive_action 10
+        # total = 70
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id=f"risk70-old-device-{i}",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"198.51.100.{160 + i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=0,
+                    reason="previous_denial",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"risk70-failure-{i}",
+                    idempotency_key=f"risk70-failure-idem-{i}",
+                    request_fingerprint=f"risk70-failure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="203.0.113.60",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["risk_score"] == 70
+    assert body["trust_score"] == 30
+    assert body["allow"] is False
+    assert body["explanation"]["final"]["decision_source"] == "risk"
+    assert "failure_burst" in body["risk_signals"]
+    assert "new_device" in body["risk_signals"]
+    assert "new_ip" in body["risk_signals"]
+    assert "sensitive_action" in body["risk_signals"]
+
+
+def test_live_combined_risk_score_fifty_five_stays_below_deny_threshold(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # 3 failures = 35
+        # device has been seen, so no new_device
+        # unseen IP = 10
+        # sensitive_action = 10
+        # total = 55
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"198.51.100.{170 + i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=0,
+                    reason="previous_denial",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"risk55-failure-{i}",
+                    idempotency_key=f"risk55-failure-idem-{i}",
+                    request_fingerprint=f"risk55-failure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="203.0.113.61",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["risk_score"] == 55
+    assert body["trust_score"] == 45
+    assert body["risk_score"] < 70
+    assert body["explanation"]["risk"]["score"] == 55
+    assert "failure_burst" in body["risk_signals"]
+    assert "new_device" not in body["risk_signals"]
+    assert "new_ip" in body["risk_signals"]
+    assert "sensitive_action" in body["risk_signals"]
+
+
+def test_live_transfer_velocity_replaces_sensitive_action(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    current_ip = "203.0.113.62"
+    current_ip_hash = pseudonymize_ip(current_ip)
+
+    with SessionLocal() as db:
+        for i in range(2):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=current_ip_hash,
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"velocity-only-{i}",
+                    idempotency_key=f"velocity-only-idem-{i}",
+                    request_fingerprint=f"velocity-only-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=20 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address=current_ip,
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["risk_score"] == 30
+    assert body["trust_score"] == 70
+    assert body["risk_score"] < 70
+    assert body["explanation"]["risk"]["score"] == 30
+    assert "transfer_velocity" in body["risk_signals"]
+    assert "sensitive_action" not in body["risk_signals"]
+
+
+def test_live_failure_burst_plus_transfer_velocity_score_sixty_five_stays_below_deny_threshold(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    current_ip = "203.0.113.63"
+    current_ip_hash = pseudonymize_ip(current_ip)
+
+    with SessionLocal() as db:
+        for i in range(2):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=current_ip_hash,
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"risk65-transfer-{i}",
+                    idempotency_key=f"risk65-transfer-idem-{i}",
+                    request_fingerprint=f"risk65-transfer-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=10 + i),
+                )
+            )
+
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=current_ip_hash,
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=0,
+                    reason="previous_denial",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"risk65-failure-{i}",
+                    idempotency_key=f"risk65-failure-idem-{i}",
+                    request_fingerprint=f"risk65-failure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address=current_ip,
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["risk_score"] == 65
+    assert body["trust_score"] == 35
+    assert body["risk_score"] < 70
+    assert body["explanation"]["risk"]["score"] == 65
+    assert "failure_burst" in body["risk_signals"]
+    assert "transfer_velocity" in body["risk_signals"]
+    assert "sensitive_action" not in body["risk_signals"]
+
+
+def test_live_failure_burst_new_ip_and_transfer_velocity_score_seventy_five_denies(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    current_ip = "203.0.113.64"
+
+    with SessionLocal() as db:
+        for i in range(2):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"198.51.100.{180 + i}"),
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"risk75-transfer-{i}",
+                    idempotency_key=f"risk75-transfer-idem-{i}",
+                    request_fingerprint=f"risk75-transfer-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=10 + i),
+                )
+            )
+
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"198.51.100.{190 + i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=0,
+                    reason="previous_denial",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"risk75-failure-{i}",
+                    idempotency_key=f"risk75-failure-idem-{i}",
+                    request_fingerprint=f"risk75-failure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address=current_ip,
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["risk_score"] == 75
+    assert body["trust_score"] == 25
+    assert body["allow"] is False
+    assert body["explanation"]["final"]["decision_source"] == "risk"
+    assert "failure_burst" in body["risk_signals"]
+    assert "new_ip" in body["risk_signals"]
+    assert "transfer_velocity" in body["risk_signals"]
+    assert "sensitive_action" not in body["risk_signals"]
