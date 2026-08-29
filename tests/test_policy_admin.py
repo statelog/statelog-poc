@@ -5243,3 +5243,163 @@ def test_workflow_active_config_is_latest_version_while_history_contains_previou
 
     assert [item["version"] for item in history_items] == [1, 2]
     assert 3 not in [item["version"] for item in history_items]
+
+def test_workflow_history_returns_404_for_unknown_tenant(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/workflow-config/tenant-unknown/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "tenant_not_found"
+
+def test_workflow_history_returns_empty_list_when_no_history_exists(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/workflow-config/tenant-demo/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+def test_workflow_history_is_empty_while_initial_version_is_active(client):
+    ensure_setup(client)
+
+    created = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["version"] == 1
+
+    active = client.get(
+        "/admin/workflow-config/tenant-demo",
+        headers=ADMIN_HEADERS,
+    )
+    history = client.get(
+        "/admin/workflow-config/tenant-demo/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert active.status_code == 200
+    assert active.json()["version"] == 1
+
+    assert history.status_code == 200
+    assert history.json() == []
+
+def test_workflow_history_contains_only_previous_version_after_first_update(client):
+    ensure_setup(client)
+
+    created = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": False,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["version"] == 1
+
+    updated = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+    active = client.get(
+        "/admin/workflow-config/tenant-demo",
+        headers=ADMIN_HEADERS,
+    )
+    history = client.get(
+        "/admin/workflow-config/tenant-demo/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert active.status_code == 200
+    assert history.status_code == 200
+
+    active_body = active.json()
+    history_items = history.json()
+
+    assert active_body["version"] == 2
+    assert active_body["include_risk_step"] is False
+    assert active_body["include_policy_step"] is True
+    assert active_body["execution_mode"] == "policy_first"
+
+    assert len(history_items) == 1
+
+    archived = history_items[0]
+
+    assert archived["version"] == 1
+    assert archived["include_risk_step"] is True
+    assert archived["include_policy_step"] is False
+    assert archived["execution_mode"] == "risk_first"
+
+def test_workflow_history_snapshot_includes_created_at(client):
+    ensure_setup(client)
+
+    created = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["version"] == 1
+
+    updated = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+    history = client.get(
+        "/admin/workflow-config/tenant-demo/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert history.status_code == 200
+
+    items = history.json()
+
+    assert len(items) == 1
+    assert items[0]["version"] == 1
+    assert items[0]["created_at"] is not None
+    assert isinstance(items[0]["created_at"], str)
+    assert items[0]["created_at"] != ""
