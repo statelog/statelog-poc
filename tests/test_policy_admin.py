@@ -4563,3 +4563,88 @@ def test_load_risk_history_filters_future_logs_before_latest_ten_limit(client):
         trace_id.startswith("future-limit-future-")
         for trace_id in trace_ids
     )
+
+def test_load_risk_history_without_before_filters_tenant_and_right_before_limit(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    def make_log(tenant_id, right_id, trace_id, created_at):
+        return RequestLog(
+            tenant_id=tenant_id,
+            right_id=right_id,
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"{trace_id}-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=trace_id,
+            idempotency_key=f"{trace_id}-idem",
+            request_fingerprint=f"{trace_id}-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=created_at,
+        )
+
+    with SessionLocal() as db:
+        target = make_log(
+            "tenant-demo",
+            "right-001",
+            "live-filter-before-limit-target",
+            now - timedelta(hours=2),
+        )
+        db.add(target)
+
+        for i in range(12):
+            db.add(
+                make_log(
+                    "tenant-other",
+                    "right-001",
+                    f"live-filter-other-tenant-{i}",
+                    now - timedelta(minutes=i + 1),
+                )
+            )
+
+        for i in range(12):
+            db.add(
+                make_log(
+                    "tenant-demo",
+                    "right-other",
+                    f"live-filter-other-right-{i}",
+                    now - timedelta(minutes=i + 1),
+                )
+            )
+
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+        )
+
+        trace_ids = {log.trace_id for log in history}
+
+    assert "live-filter-before-limit-target" in trace_ids
+    assert not any(
+        trace_id.startswith("live-filter-other-tenant-")
+        for trace_id in trace_ids
+    )
+    assert not any(
+        trace_id.startswith("live-filter-other-right-")
+        for trace_id in trace_ids
+    )
