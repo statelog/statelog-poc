@@ -2421,3 +2421,82 @@ def test_live_geo_change_filters_other_right_before_latest_ten_limit(client):
     body = response.json()
 
     assert "geo_change" not in body["risk_signals"]
+
+def test_live_geo_change_filters_other_tenant_before_latest_ten_limit(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="relevant-tenant-ee-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="relevant-tenant-ee-trace",
+                idempotency_key="relevant-tenant-ee-idem",
+                request_fingerprint="relevant-tenant-ee-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=10),
+            )
+        )
+
+        for i in range(15):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-other",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"other-tenant-pressure-ip-{i}",
+                    country_code="FI",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"other-tenant-pressure-{i}",
+                    idempotency_key=f"other-tenant-pressure-idem-{i}",
+                    request_fingerprint=f"other-tenant-pressure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "geo_change" not in body["risk_signals"]
