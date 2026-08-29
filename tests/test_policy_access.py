@@ -1808,9 +1808,33 @@ def test_live_access_failure_burst_excludes_failures_outside_15_minute_window(cl
         ip_address="10.0.0.10",
         country_code="EE",
     )
-
     assert response.status_code == 200
 
     body = response.json()
 
     assert "failure_burst" not in body["risk_signals"]
+
+def test_live_ownership_transfer_triggers_sensitive_action_without_transfer_velocity(client):
+    ensure_setup(client)
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "sensitive_action" in body["risk_signals"]
+    assert "transfer_velocity" not in body["risk_signals"]
