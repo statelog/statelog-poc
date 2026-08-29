@@ -1955,3 +1955,87 @@ def test_live_transfer_velocity_excludes_transfers_outside_one_hour_window(clien
 
     assert "transfer_velocity" not in body["risk_signals"]
     assert "sensitive_action" in body["risk_signals"]
+
+def test_live_new_ip_same_timestamp_boundary_prefers_higher_ids(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    same_time = utcnow_naive() - timedelta(minutes=5)
+    matching_ip_hash = pseudonymize_ip("10.0.0.10")
+
+    with SessionLocal() as db:
+        # Lowest id: matching IP. With deterministic same-timestamp ordering
+        # by id desc, this row must fall outside the latest five.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=matching_ip_hash,
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="same-time-low-id",
+                idempotency_key="same-time-low-idem",
+                request_fingerprint="same-time-low-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=same_time,
+            )
+        )
+        db.flush()
+
+        for i in range(5):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"same-time-other-ip-{i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"same-time-high-id-{i}",
+                    idempotency_key=f"same-time-high-idem-{i}",
+                    request_fingerprint=f"same-time-high-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=same_time,
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "new_ip" in body["risk_signals"]
