@@ -4711,3 +4711,61 @@ def test_load_risk_history_without_before_same_timestamp_latest_ten_is_determini
     assert history_ids == expected_ids
     assert min(ids) not in history_ids
     assert sorted(ids)[1] not in history_ids
+
+def test_load_risk_history_without_before_deduplicates_overlapping_logs(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    def make_log(trace_id, created_at):
+        return RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"{trace_id}-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=trace_id,
+            idempotency_key=f"{trace_id}-idem",
+            request_fingerprint=f"{trace_id}-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=created_at,
+        )
+
+    with SessionLocal() as db:
+        overlap = make_log(
+            "live-dedup-overlap",
+            now - timedelta(minutes=5),
+        )
+        db.add(overlap)
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+        )
+
+        matching = [
+            log
+            for log in history
+            if log.trace_id == "live-dedup-overlap"
+        ]
+
+    assert len(matching) == 1
