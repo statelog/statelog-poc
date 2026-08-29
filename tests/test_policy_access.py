@@ -1574,3 +1574,137 @@ def test_live_access_new_device_does_not_trigger_when_seen_in_five_most_recent_l
     body = response.json()
 
     assert "new_device" not in body["risk_signals"]
+
+def test_live_access_geo_change_uses_only_ten_most_recent_logs(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # Same country exists, but only as the 11th most recent log.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="geo-old-ee-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="live-geo-old-ee",
+                idempotency_key="live-geo-old-ee-idem",
+                request_fingerprint="live-geo-old-ee-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=11),
+            )
+        )
+
+        # Ten newer logs are all from FI.
+        for i in range(10):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"live-geo-fi-ip-{i}",
+                    country_code="FI",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"live-geo-fi-{i}",
+                    idempotency_key=f"live-geo-fi-idem-{i}",
+                    request_fingerprint=f"live-geo-fi-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=10 - i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "geo_change" in body["risk_signals"]
+
+def test_live_access_geo_change_does_not_trigger_when_country_seen_in_ten_most_recent_logs(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        for i in range(10):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"live-geo-seen-ip-{i}",
+                    country_code="EE" if i == 9 else "FI",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"live-geo-seen-{i}",
+                    idempotency_key=f"live-geo-seen-idem-{i}",
+                    request_fingerprint=f"live-geo-seen-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=10 - i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "geo_change" not in body["risk_signals"]
