@@ -2553,3 +2553,87 @@ def test_live_failure_burst_ignores_future_logs(client):
     body = response.json()
 
     assert "failure_burst" not in body["risk_signals"]
+
+def test_live_new_ip_future_logs_do_not_pressure_latest_five(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    matching_ip_hash = pseudonymize_ip("10.0.0.10")
+
+    with SessionLocal() as db:
+        # Valid past history: the current IP has already been seen.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=matching_ip_hash,
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="future-pressure-valid-past",
+                idempotency_key="future-pressure-valid-past-idem",
+                request_fingerprint="future-pressure-valid-past-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=5),
+            )
+        )
+
+        # These rows are in the future and must be excluded before
+        # latest-five history is selected.
+        for i in range(10):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"future-pressure-ip-{i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"future-pressure-{i}",
+                    idempotency_key=f"future-pressure-idem-{i}",
+                    request_fingerprint=f"future-pressure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now + timedelta(minutes=5 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "new_ip" not in body["risk_signals"]
