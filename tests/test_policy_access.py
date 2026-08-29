@@ -2176,3 +2176,60 @@ def test_live_failure_burst_does_not_trigger_with_only_two_recent_failures(clien
     body = response.json()
 
     assert "failure_burst" not in body["risk_signals"]
+
+def test_live_transfer_velocity_does_not_trigger_with_only_one_recent_transfer(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="one-transfer-ip",
+                country_code="EE",
+                request_type="ownership_transfer",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="one-transfer-trace",
+                idempotency_key="one-transfer-idem",
+                request_fingerprint="one-transfer-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=30),
+            )
+        )
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "transfer_velocity" not in body["risk_signals"]
+    assert "sensitive_action" in body["risk_signals"]
