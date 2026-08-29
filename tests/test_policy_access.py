@@ -3124,3 +3124,285 @@ def test_live_geo_change_future_logs_do_not_pressure_latest_ten(client):
     body = response.json()
 
     assert "geo_change" not in body["risk_signals"]
+
+def test_live_transfer_velocity_ignores_future_transfers(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"future-transfer-ip-{i}",
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"future-transfer-{i}",
+                    idempotency_key=f"future-transfer-idem-{i}",
+                    request_fingerprint=f"future-transfer-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now + timedelta(minutes=10 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "transfer_velocity" not in body["risk_signals"]
+    assert "sensitive_action" in body["risk_signals"]
+
+
+def test_live_transfer_velocity_does_not_count_future_transfer_with_one_past_transfer(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="mixed-transfer-past-ip",
+                country_code="EE",
+                request_type="ownership_transfer",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="mixed-transfer-past",
+                idempotency_key="mixed-transfer-past-idem",
+                request_fingerprint="mixed-transfer-past-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=20),
+            )
+        )
+
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="mixed-transfer-future-ip",
+                country_code="EE",
+                request_type="ownership_transfer",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="mixed-transfer-future",
+                idempotency_key="mixed-transfer-future-idem",
+                request_fingerprint="mixed-transfer-future-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now + timedelta(minutes=20),
+            )
+        )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "transfer_velocity" not in body["risk_signals"]
+    assert "sensitive_action" in body["risk_signals"]
+
+
+def test_live_transfer_velocity_survives_future_transfer_pressure(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        # Two valid historical transfers are enough for transfer_velocity.
+        for i in range(2):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"valid-past-transfer-ip-{i}",
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"valid-past-transfer-{i}",
+                    idempotency_key=f"valid-past-transfer-idem-{i}",
+                    request_fingerprint=f"valid-past-transfer-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=30 + i),
+                )
+            )
+
+        # Future rows must not displace valid historical rows.
+        for i in range(15):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"future-pressure-transfer-ip-{i}",
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"future-pressure-transfer-{i}",
+                    idempotency_key=f"future-pressure-transfer-idem-{i}",
+                    request_fingerprint=f"future-pressure-transfer-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now + timedelta(minutes=10 + i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "transfer_velocity" in body["risk_signals"]
+
+
+def test_live_failure_burst_counts_three_failures_with_same_timestamp(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    same_time = utcnow_naive() - timedelta(minutes=5)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"same-time-failure-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80,
+                    reason="previous_denial",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"same-time-failure-{i}",
+                    idempotency_key=f"same-time-failure-idem-{i}",
+                    request_fingerprint=f"same-time-failure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=same_time,
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "failure_burst" in body["risk_signals"]
