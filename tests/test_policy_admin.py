@@ -4769,3 +4769,75 @@ def test_load_risk_history_without_before_deduplicates_overlapping_logs(client):
         ]
 
     assert len(matching) == 1
+
+def test_load_risk_history_without_before_respects_one_hour_boundary(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    def make_log(trace_id, created_at):
+        return RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"{trace_id}-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=trace_id,
+            idempotency_key=f"{trace_id}-idem",
+            request_fingerprint=f"{trace_id}-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=created_at,
+        )
+
+    with SessionLocal() as db:
+        db.add(
+            make_log(
+                "live-boundary-59-minutes",
+                now - timedelta(minutes=59),
+            )
+        )
+        db.add(
+            make_log(
+                "live-boundary-61-minutes",
+                now - timedelta(minutes=61),
+            )
+        )
+
+        # Push the 61-minute-old log outside latest_ten.
+        for i in range(10):
+            db.add(
+                make_log(
+                    f"live-boundary-recent-{i}",
+                    now - timedelta(minutes=i + 1),
+                )
+            )
+
+        db.commit()
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+        )
+
+        trace_ids = {log.trace_id for log in history}
+
+    assert "live-boundary-59-minutes" in trace_ids
+    assert "live-boundary-61-minutes" not in trace_ids
