@@ -4841,3 +4841,81 @@ def test_load_risk_history_without_before_respects_one_hour_boundary(client):
 
     assert "live-boundary-59-minutes" in trace_ids
     assert "live-boundary-61-minutes" not in trace_ids
+
+def test_load_risk_history_future_logs_do_not_displace_latest_ten(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+
+    def make_log(trace_id, created_at):
+        return RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"{trace_id}-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=trace_id,
+            idempotency_key=f"{trace_id}-idem",
+            request_fingerprint=f"{trace_id}-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=created_at,
+        )
+
+    with SessionLocal() as db:
+        historical = []
+
+        # These are older than one hour, so they can only enter
+        # through the latest_ten branch.
+        for i in range(10):
+            log = make_log(
+                f"future-pressure-history-{i}",
+                now - timedelta(hours=2, minutes=i),
+            )
+            db.add(log)
+            historical.append(log)
+
+        # Future logs must neither be returned nor consume
+        # positions in latest_ten.
+        for i in range(12):
+            db.add(
+                make_log(
+                    f"future-pressure-future-{i}",
+                    now + timedelta(hours=1, minutes=i),
+                )
+            )
+
+        db.commit()
+
+        historical_ids = {log.id for log in historical}
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+        )
+
+        history_ids = {log.id for log in history}
+        trace_ids = {log.trace_id for log in history}
+
+    assert historical_ids.issubset(history_ids)
+    assert not any(
+        trace_id.startswith("future-pressure-future-")
+        for trace_id in trace_ids
+    )
