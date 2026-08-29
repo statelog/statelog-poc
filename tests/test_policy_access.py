@@ -4102,3 +4102,391 @@ def test_live_new_device_filters_other_scope_before_latest_five_limit(client):
     body = response.json()
 
     assert "new_device" not in body["risk_signals"]
+
+def test_live_new_ip_filters_other_tenant_before_latest_five_limit(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    matching_ip = "203.0.113.250"
+
+    with SessionLocal() as db:
+        # Matching IP belongs to the correct tenant/right.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=pseudonymize_ip(matching_ip),
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="new-ip-scope-valid-tenant",
+                idempotency_key="new-ip-scope-valid-tenant-idem",
+                request_fingerprint="new-ip-scope-valid-tenant-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=10),
+            )
+        )
+
+        # These are newer, but belong to another tenant and must be filtered
+        # before the latest-five history is selected.
+        for i in range(6):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-other",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"198.51.100.{100 + i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"new-ip-other-tenant-pressure-{i}",
+                    idempotency_key=f"new-ip-other-tenant-pressure-idem-{i}",
+                    request_fingerprint=f"new-ip-other-tenant-pressure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=4),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address=matching_ip,
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_ip" not in body["risk_signals"]
+
+
+def test_live_new_ip_filters_other_right_before_latest_five_limit(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    matching_ip = "203.0.113.251"
+
+    with SessionLocal() as db:
+        # Matching IP belongs to the correct tenant/right.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=pseudonymize_ip(matching_ip),
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="new-ip-scope-valid-right",
+                idempotency_key="new-ip-scope-valid-right-idem",
+                request_fingerprint="new-ip-scope-valid-right-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=10),
+            )
+        )
+
+        # These are newer, but belong to another right and must be filtered
+        # before the latest-five history is selected.
+        for i in range(6):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-other",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"198.51.100.{120 + i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"new-ip-other-right-pressure-{i}",
+                    idempotency_key=f"new-ip-other-right-pressure-idem-{i}",
+                    request_fingerprint=f"new-ip-other-right-pressure-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=4),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address=matching_ip,
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_ip" not in body["risk_signals"]
+
+def test_live_transfer_velocity_counts_two_transfers_with_same_timestamp(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    same_time = utcnow_naive() - timedelta(minutes=20)
+
+    with SessionLocal() as db:
+        for i in range(2):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"same-time-transfer-ip-{i}",
+                    country_code="EE",
+                    request_type="ownership_transfer",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"same-time-transfer-{i}",
+                    idempotency_key=f"same-time-transfer-idem-{i}",
+                    request_fingerprint=f"same-time-transfer-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=same_time,
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+        user_id="user-123",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "transfer_velocity" in body["risk_signals"]
+
+
+def test_live_new_ip_same_timestamp_matching_higher_id_remains_in_latest_five(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    same_time = utcnow_naive() - timedelta(minutes=5)
+    matching_ip = "203.0.113.252"
+
+    with SessionLocal() as db:
+        for i in range(5):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"198.51.100.{140 + i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"new-ip-same-time-lower-{i}",
+                    idempotency_key=f"new-ip-same-time-lower-idem-{i}",
+                    request_fingerprint=f"new-ip-same-time-lower-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=same_time,
+                )
+            )
+
+        db.flush()
+
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=pseudonymize_ip(matching_ip),
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="new-ip-same-time-high-match",
+                idempotency_key="new-ip-same-time-high-match-idem",
+                request_fingerprint="new-ip-same-time-high-match-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=same_time,
+            )
+        )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address=matching_ip,
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "new_ip" not in body["risk_signals"]
+
+
+def test_live_geo_change_same_timestamp_matching_higher_id_remains_in_latest_ten(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    same_time = utcnow_naive() - timedelta(minutes=5)
+
+    with SessionLocal() as db:
+        for i in range(10):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"geo-same-time-lower-ip-{i}",
+                    country_code="FI",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"geo-same-time-lower-{i}",
+                    idempotency_key=f"geo-same-time-lower-idem-{i}",
+                    request_fingerprint=f"geo-same-time-lower-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=same_time,
+                )
+            )
+
+        db.flush()
+
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="geo-same-time-high-ee-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="geo-same-time-high-ee",
+                idempotency_key="geo-same-time-high-ee-idem",
+                request_fingerprint="geo-same-time-high-ee-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=same_time,
+            )
+        )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "geo_change" not in body["risk_signals"]
