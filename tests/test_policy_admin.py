@@ -4648,3 +4648,66 @@ def test_load_risk_history_without_before_filters_tenant_and_right_before_limit(
         trace_id.startswith("live-filter-other-right-")
         for trace_id in trace_ids
     )
+
+def test_load_risk_history_without_before_same_timestamp_latest_ten_is_deterministic(client):
+    ensure_setup(client)
+
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.main import load_risk_history
+    from app.models import RequestLog
+    from app.time_utils import utcnow_naive
+
+    now = utcnow_naive()
+    same_time = now - timedelta(hours=2)
+
+    def make_log(trace_id):
+        return RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash=f"{trace_id}-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=True,
+            risk_score=0,
+            reason="allowed",
+            risk_signals="",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=trace_id,
+            idempotency_key=f"{trace_id}-idem",
+            request_fingerprint=f"{trace_id}-fingerprint",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=same_time,
+        )
+
+    with SessionLocal() as db:
+        logs = []
+
+        for i in range(12):
+            log = make_log(f"live-same-time-{i}")
+            db.add(log)
+            logs.append(log)
+
+        db.commit()
+
+        ids = [log.id for log in logs]
+
+        history = load_risk_history(
+            db,
+            tenant_id="tenant-demo",
+            right_id="right-001",
+        )
+
+        history_ids = {log.id for log in history}
+
+    expected_ids = set(sorted(ids, reverse=True)[:10])
+
+    assert history_ids == expected_ids
+    assert min(ids) not in history_ids
+    assert sorted(ids)[1] not in history_ids
