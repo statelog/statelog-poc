@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from app.time_utils import utcnow_naive
+from app.services.privacy_service import pseudonymize_ip
 from app.models import PolicyRecord, RequestLog
 from app.models import PolicyRecord
 
@@ -1226,8 +1227,10 @@ def test_live_access_failure_burst_survives_high_traffic_history(client):
     ensure_setup(client)
 
     from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
 
     now = utcnow_naive()
+    same_ip_hash = pseudonymize_ip("same-live-ip")
 
     with SessionLocal() as db:
         # Three failures still inside the 15-minute failure-burst window.
@@ -1303,3 +1306,139 @@ def test_live_access_failure_burst_survives_high_traffic_history(client):
     body = response.json()
 
     assert "failure_burst" in body["risk_signals"]
+
+def test_live_access_new_ip_uses_only_five_most_recent_logs(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    same_ip_hash = pseudonymize_ip("same-live-ip")
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash=same_ip_hash,
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="live-new-ip-old-same",
+                idempotency_key="live-new-ip-old-same-idem",
+                request_fingerprint="live-new-ip-old-same-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=now - timedelta(minutes=6),
+            )
+        )
+
+        for i in range(5):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=pseudonymize_ip(f"different-live-ip-{i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"live-new-ip-recent-{i}",
+                    idempotency_key=f"live-new-ip-recent-idem-{i}",
+                    request_fingerprint=f"live-new-ip-recent-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5 - i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="same-live-ip",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "new_ip" in body["risk_signals"]
+
+def test_live_access_new_ip_does_not_trigger_when_seen_in_five_most_recent_logs(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+    from app.services.privacy_service import pseudonymize_ip
+
+    now = utcnow_naive()
+    same_ip_hash = pseudonymize_ip("same-live-ip")
+
+    with SessionLocal() as db:
+        for i in range(5):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=same_ip_hash if i == 4 else pseudonymize_ip(f"other-live-ip-{i}"),
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"live-new-ip-seen-{i}",
+                    idempotency_key=f"live-new-ip-seen-idem-{i}",
+                    request_fingerprint=f"live-new-ip-seen-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=now - timedelta(minutes=5 - i),
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="same-live-ip",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "new_ip" not in body["risk_signals"]
