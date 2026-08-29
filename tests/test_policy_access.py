@@ -2039,3 +2039,87 @@ def test_live_new_ip_same_timestamp_boundary_prefers_higher_ids(client):
     body = response.json()
 
     assert "new_ip" in body["risk_signals"]
+
+def test_live_geo_change_same_timestamp_boundary_prefers_higher_ids(client):
+    ensure_setup(client)
+
+    from app.time_utils import utcnow_naive
+
+    same_time = utcnow_naive() - timedelta(minutes=5)
+
+    with SessionLocal() as db:
+        # Lowest id: EE. With deterministic same-timestamp ordering
+        # by id desc, this row must fall outside the latest ten.
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="gate-A1",
+                user_id="user-123",
+                ip_hash="same-time-geo-ee",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                trace_id="same-time-geo-low-id",
+                idempotency_key="same-time-geo-low-idem",
+                request_fingerprint="same-time-geo-low-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=same_time,
+            )
+        )
+        db.flush()
+
+        countries = ["FI", "SE", "NO", "DK", "DE", "FR", "ES", "IT", "NL", "BE"]
+
+        for i, country in enumerate(countries):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="gate-A1",
+                    user_id="user-123",
+                    ip_hash=f"same-time-geo-ip-{i}",
+                    country_code=country,
+                    request_type="access",
+                    allowed=True,
+                    risk_score=0,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=False,
+                    policy_name=None,
+                    trace_id=f"same-time-geo-high-id-{i}",
+                    idempotency_key=f"same-time-geo-high-idem-{i}",
+                    request_fingerprint=f"same-time-geo-high-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=same_time,
+                )
+            )
+
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A1",
+        ip_address="10.0.0.10",
+        country_code="EE",
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert "geo_change" in body["risk_signals"]
