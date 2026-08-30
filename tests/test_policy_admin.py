@@ -6404,3 +6404,101 @@ def test_replay_rejects_delete_method(client):
     )
 
     assert response.status_code == 405
+
+def test_admin_audit_logs_normalizes_zero_limit_to_one(client):
+    ensure_setup(client)
+
+    for _ in range(2):
+        token = issue_token(client).json()["token"]
+        response = access_request(client, token)
+        assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": 0,
+        },
+    )
+
+    assert audit.status_code == 200
+    assert len(audit.json()) == 1
+
+
+def test_admin_audit_logs_normalizes_negative_limit_to_one(client):
+    ensure_setup(client)
+
+    for _ in range(2):
+        token = issue_token(client).json()["token"]
+        response = access_request(client, token)
+        assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": -10,
+        },
+    )
+
+    assert audit.status_code == 200
+    assert len(audit.json()) == 1
+
+
+def test_admin_audit_logs_normalizes_negative_offset_to_zero(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    trace_id = response.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": 1,
+            "offset": -10,
+        },
+    )
+
+    assert audit.status_code == 200
+
+    items = audit.json()
+
+    assert len(items) == 1
+    assert items[0]["trace_id"] == trace_id
+
+
+def test_admin_audit_logs_rejects_non_integer_limit(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": "invalid",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_rejects_non_integer_offset(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "offset": "invalid",
+        },
+    )
+
+    assert response.status_code == 422
