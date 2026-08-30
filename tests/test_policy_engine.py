@@ -1531,3 +1531,136 @@ def test_policy_simulation_explicit_trust_overrides_derived_value():
     assert simulation.matched is True
     assert simulation.decision.allow is True
     assert simulation.policy_name == "simulation-explicit-trust"
+
+def test_policy_effect_allow_is_case_insensitive():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="uppercase-allow",
+                effect="ALLOW",
+                request_types=("access",),
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "uppercase-allow"
+
+
+def test_policy_effect_deny_is_case_insensitive():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="mixed-case-deny",
+                effect="DeNy",
+                request_types=("access",),
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is False
+    assert decision.policy_name == "mixed-case-deny"
+
+
+def test_unknown_policy_effect_does_not_match():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="unknown-effect",
+                effect="audit",
+                request_types=("access",),
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is False
+    assert decision.allow is None
+    assert decision.reason == "no_policy_match"
+
+
+def test_unknown_higher_priority_effect_falls_through_to_valid_policy():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="unknown-high-priority",
+                effect="audit",
+                priority=100,
+                request_types=("access",),
+            ),
+            Policy(
+                name="valid-lower-priority",
+                effect="allow",
+                priority=10,
+                request_types=("access",),
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "valid-lower-priority"
+
+
+def test_empty_policy_effect_falls_through_to_valid_policy():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="empty-effect-high-priority",
+                effect="",
+                priority=100,
+                request_types=("access",),
+            ),
+            Policy(
+                name="valid-deny",
+                effect="deny",
+                priority=10,
+                request_types=("access",),
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is False
+    assert decision.policy_name == "valid-deny"
