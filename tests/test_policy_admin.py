@@ -7202,3 +7202,93 @@ def test_admin_policy_simulation_rejects_invalid_risk_score_type(client):
     )
 
     assert response.status_code == 422
+
+def test_admin_policy_simulation_requires_device_id(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "country_code": "EE",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_requires_country_code(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_invalid_trust_score_type(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": "not-a-number",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_invalid_transaction_amount_type(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "transaction_amount": "not-a-number",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_invalid_hour_type(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "hour": "not-a-number",
+        },
+    )
+
+    assert response.status_code == 422
