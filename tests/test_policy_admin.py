@@ -6084,3 +6084,110 @@ def test_policy_history_requires_admin_authentication(client):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_admin"
+
+def test_policy_history_exposes_temporal_fields(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "policy-history-temporal-fields",
+            "effect": "allow",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+            "valid_from": "2026-08-01T00:00:00",
+            "expires_at": "2026-12-31T23:59:59",
+        },
+    )
+
+    assert created.status_code == 200
+
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "priority": 2,
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+    history = client.get(
+        f"/admin/policies/{policy_id}/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert history.status_code == 200
+
+    items = history.json()
+
+    assert len(items) == 1
+
+    snapshot = items[0]
+
+    assert snapshot["version"] == 1
+    assert snapshot["valid_from"] is not None
+    assert snapshot["expires_at"] is not None
+    assert snapshot["created_at"] is not None
+
+def test_policy_history_remains_readable_after_policy_deletion(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "deleted-policy-history",
+            "effect": "deny",
+            "priority": 10,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"priority": 20},
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+    deleted = client.delete(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+
+    history = client.get(
+        f"/admin/policies/{policy_id}/history",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert history.status_code == 200
+
+    items = history.json()
+
+    assert [item["version"] for item in items] == [1, 2]
+    assert items[0]["policy_id"] == policy_id
+    assert items[1]["policy_id"] == policy_id
+    assert items[0]["policy_name"] == "deleted-policy-history"
+    assert items[1]["policy_name"] == "deleted-policy-history"

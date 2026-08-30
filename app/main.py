@@ -820,15 +820,15 @@ def get_policy_history(
 ):
     policy = db.get(PolicyRecord, policy_id)
 
-    if not policy:
-        raise HTTPException(status_code=404, detail="policy_not_found")
-
     history = (
         db.query(PolicyHistory)
         .filter_by(policy_id=policy_id)
         .order_by(PolicyHistory.version.asc())
         .all()
     )
+
+    if policy is None and not history:
+        raise HTTPException(status_code=404, detail="policy_not_found")
 
     return [
         {
@@ -860,6 +860,9 @@ def get_policy_history(
             "allowed_start_hour": item.allowed_start_hour,
             "allowed_end_hour": item.allowed_end_hour,
             "enabled": item.enabled,
+            "valid_from": item.valid_from,
+            "expires_at": item.expires_at,
+            "created_at": item.created_at,
         }
         for item in history
     ]
