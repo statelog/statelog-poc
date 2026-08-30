@@ -1410,3 +1410,124 @@ def test_explicit_trust_score_overrides_derived_value():
     assert decision.matched is True
     assert decision.allow is True
     assert decision.policy_name == "explicit-trust"
+
+def test_policy_simulation_derives_trust_score_when_missing():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="simulation-derived-trust",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=60,
+            )
+        ]
+    )
+
+    simulation = engine.simulate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=40,
+        trust_score=None,
+    )
+
+    assert simulation.matched is True
+    assert simulation.decision.allow is True
+    assert simulation.policy_name == "simulation-derived-trust"
+
+
+def test_policy_simulation_derived_trust_rejects_below_minimum():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="simulation-derived-trust",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=60,
+            )
+        ]
+    )
+
+    simulation = engine.simulate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=41,
+        trust_score=None,
+    )
+
+    assert simulation.matched is False
+    assert simulation.decision.reason == "no_policy_match"
+
+
+def test_policy_simulation_derived_trust_allows_zero_boundary():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="simulation-zero-trust",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=0,
+            )
+        ]
+    )
+
+    simulation = engine.simulate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=100,
+        trust_score=None,
+    )
+
+    assert simulation.matched is True
+    assert simulation.decision.allow is True
+
+
+def test_policy_simulation_derived_trust_clamps_above_risk_hundred():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="simulation-zero-trust",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=1,
+            )
+        ]
+    )
+
+    simulation = engine.simulate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=150,
+        trust_score=None,
+    )
+
+    assert simulation.matched is False
+    assert simulation.decision.reason == "no_policy_match"
+
+
+def test_policy_simulation_explicit_trust_overrides_derived_value():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="simulation-explicit-trust",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=80,
+            )
+        ]
+    )
+
+    simulation = engine.simulate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=90,
+        trust_score=90,
+    )
+
+    assert simulation.matched is True
+    assert simulation.decision.allow is True
+    assert simulation.policy_name == "simulation-explicit-trust"
