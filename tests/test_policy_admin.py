@@ -6680,3 +6680,77 @@ def test_admin_audit_log_count_combines_filters_with_no_match(client):
 
     assert count.status_code == 200
     assert count.json()["total"] == 0
+
+def test_admin_audit_log_count_rejects_invalid_allowed(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "allowed": "not-a-boolean",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_invalid_policy_version(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": "not-an-integer",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_invalid_min_risk_score(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "min_risk_score": "not-an-integer",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_invalid_from_time(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "not-a-datetime",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_invalid_to_time(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "to_time": "not-a-datetime",
+        },
+    )
+
+    assert response.status_code == 422
