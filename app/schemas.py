@@ -79,13 +79,13 @@ class DecisionResponse(BaseModel):
     explanation: dict = {}
 
 class PolicySimulationRequest(BaseModel):
-    tenant_id: str
-    request_type: str
-    device_id: str
-    country_code: str
+    tenant_id: str = Field(min_length=1)
+    request_type: str = Field(min_length=1)
+    device_id: str = Field(min_length=1)
+    country_code: str = Field(min_length=1)
     risk_score: int = Field(ge=0, le=100)
     trust_score: Optional[int] = Field(default=None, ge=0, le=100)
-    transaction_amount: Optional[float] = None
+    transaction_amount: Optional[float] = Field(default=None, ge=0)
     hour: Optional[int] = Field(default=None, ge=0, le=23)
 
 class PolicyCreate(BaseModel):

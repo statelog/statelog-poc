@@ -7384,3 +7384,93 @@ def test_admin_policy_simulation_rejects_hour_above_twenty_three(client):
     )
 
     assert response.status_code == 422
+
+def test_admin_policy_simulation_rejects_negative_transaction_amount(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "transaction_amount": -1.0,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_empty_tenant_id(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_empty_request_type(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_empty_device_id(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "",
+            "country_code": "EE",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_empty_country_code(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 422
