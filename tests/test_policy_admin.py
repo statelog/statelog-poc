@@ -9511,3 +9511,160 @@ def test_save_policy_history_preserves_temporal_constraints(client):
 
         assert history.valid_from == valid_from
         assert history.expires_at == expires_at
+
+def test_policy_history_round_trip_preserves_identity_fields(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="round-trip-identity",
+            effect="deny",
+            priority=7,
+            version=4,
+            enabled=True,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        restored = load_policy_version(
+            db, "tenant-demo", policy_id, 4
+        )
+
+    assert restored is not None
+    assert restored.policy_id == policy_id
+    assert restored.name == "round-trip-identity"
+    assert restored.effect == "deny"
+    assert restored.priority == 7
+    assert restored.version == 4
+
+
+def test_policy_history_round_trip_preserves_filters(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="round-trip-filters",
+            effect="allow",
+            priority=10,
+            version=2,
+            request_types="access,ownership_transfer",
+            countries="EE,FI",
+            device_ids="gate-A1,gate-B2",
+            enabled=True,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        restored = load_policy_version(
+            db, "tenant-demo", policy_id, 2
+        )
+
+    assert restored is not None
+    assert restored.request_types == ("access", "ownership_transfer")
+    assert restored.countries == ("EE", "FI")
+    assert restored.device_ids == ("gate-A1", "gate-B2")
+
+
+def test_policy_history_round_trip_preserves_numeric_constraints(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="round-trip-constraints",
+            effect="allow",
+            priority=10,
+            version=2,
+            max_risk_score=70,
+            min_trust_score=30,
+            max_transaction_amount=12500.0,
+            enabled=True,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        restored = load_policy_version(
+            db, "tenant-demo", policy_id, 2
+        )
+
+    assert restored is not None
+    assert restored.max_risk_score == 70
+    assert restored.min_trust_score == 30
+    assert restored.max_transaction_amount == 12500.0
+
+
+def test_policy_history_round_trip_preserves_business_hours(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="round-trip-hours",
+            effect="allow",
+            priority=10,
+            version=2,
+            allowed_start_hour=22,
+            allowed_end_hour=6,
+            enabled=True,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        restored = load_policy_version(
+            db, "tenant-demo", policy_id, 2
+        )
+
+    assert restored is not None
+    assert restored.allowed_start_hour == 22
+    assert restored.allowed_end_hour == 6
+
+
+def test_policy_history_round_trip_preserves_temporal_constraints(client):
+    ensure_setup(client)
+
+    valid_from = datetime(2026, 9, 1, 8, 0, 0)
+    expires_at = datetime(2026, 9, 10, 18, 0, 0)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="round-trip-temporal",
+            effect="allow",
+            priority=10,
+            version=2,
+            valid_from=valid_from,
+            expires_at=expires_at,
+            enabled=True,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        restored = load_policy_version(
+            db, "tenant-demo", policy_id, 2
+        )
+
+    assert restored is not None
+    assert restored.valid_from == valid_from
+    assert restored.expires_at == expires_at
