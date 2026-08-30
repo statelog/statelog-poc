@@ -6754,3 +6754,168 @@ def test_admin_audit_log_count_rejects_invalid_to_time(client):
     )
 
     assert response.status_code == 422
+
+def test_list_policies_requires_admin_authentication(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/policies",
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_list_policies_rejects_invalid_admin_api_key(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/policies",
+        headers={"X-Admin-Api-Key": "wrong-admin-key"},
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_list_policies_isolates_tenants(client):
+    ensure_setup(client)
+
+    demo_policy = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "demo-isolation-policy",
+            "effect": "allow",
+            "priority": 10,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+    assert demo_policy.status_code == 200
+
+    other_policy = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "name": "other-isolation-policy",
+            "effect": "deny",
+            "priority": 20,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+    assert other_policy.status_code == 200
+
+    response = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 200
+
+    items = response.json()
+    names = [item["name"] for item in items]
+
+    assert "demo-isolation-policy" in names
+    assert "other-isolation-policy" not in names
+    assert all(item["tenant_id"] == "tenant-demo" for item in items)
+
+
+def test_list_policies_orders_by_priority_ascending(client):
+    ensure_setup(client)
+
+    high_priority = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "priority-80-policy",
+            "effect": "allow",
+            "priority": 80,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+    assert high_priority.status_code == 200
+
+    low_priority = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "priority-10-policy",
+            "effect": "allow",
+            "priority": 10,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+    assert low_priority.status_code == 200
+
+    response = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 200
+
+    relevant = [
+        item
+        for item in response.json()
+        if item["name"] in {
+            "priority-80-policy",
+            "priority-10-policy",
+        }
+    ]
+
+    assert [item["name"] for item in relevant] == [
+        "priority-10-policy",
+        "priority-80-policy",
+    ]
+
+
+def test_list_policies_excludes_deleted_policy(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "deleted-list-policy",
+            "effect": "allow",
+            "priority": 15,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    deleted = client.delete(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+
+    response = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 200
+
+    ids = [item["id"] for item in response.json()]
+
+    assert policy_id not in ids
