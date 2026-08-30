@@ -1040,3 +1040,96 @@ def test_policy_combined_risk_and_trust_boundaries_match():
         trust_score=60,
         context={},
     ) is True
+
+def test_policy_request_types_matches_second_allowed_value():
+    policy = Policy(
+        name="multi-request-type",
+        effect="allow",
+        request_types=("access", "ownership_transfer"),
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="ownership_transfer",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={},
+    ) is True
+
+
+def test_policy_device_ids_matches_second_allowed_value():
+    policy = Policy(
+        name="multi-device",
+        effect="allow",
+        device_ids=("gate-A1", "gate-B2"),
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="gate-B2",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={},
+    ) is True
+
+
+def test_policy_countries_matches_second_allowed_value():
+    policy = Policy(
+        name="multi-country",
+        effect="allow",
+        countries=("EE", "FI"),
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="FI",
+        risk_score=10,
+        trust_score=90,
+        context={},
+    ) is True
+
+
+def test_policy_multiple_filters_match_when_all_values_allowed():
+    policy = Policy(
+        name="multi-filter",
+        effect="allow",
+        request_types=("access", "ownership_transfer"),
+        device_ids=("gate-A1", "gate-B2"),
+        countries=("EE", "FI"),
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="ownership_transfer",
+        device_id="gate-B2",
+        country_code="FI",
+        risk_score=10,
+        trust_score=90,
+        context={},
+    ) is True
+
+
+def test_policy_multiple_filters_reject_when_one_value_not_allowed():
+    policy = Policy(
+        name="multi-filter",
+        effect="allow",
+        request_types=("access", "ownership_transfer"),
+        device_ids=("gate-A1", "gate-B2"),
+        countries=("EE", "FI"),
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="ownership_transfer",
+        device_id="gate-B2",
+        country_code="SE",
+        risk_score=10,
+        trust_score=90,
+        context={},
+    ) is False
