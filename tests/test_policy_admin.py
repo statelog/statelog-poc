@@ -6191,3 +6191,69 @@ def test_policy_history_remains_readable_after_policy_deletion(client):
     assert items[1]["policy_id"] == policy_id
     assert items[0]["policy_name"] == "deleted-policy-history"
     assert items[1]["policy_name"] == "deleted-policy-history"
+
+def test_admin_audit_logs_filter_tenant_before_limit(client):
+    ensure_setup(client)
+
+    from tests.test_smoke import OTHER_HEADERS
+
+    tenant_demo_token = issue_token(client).json()["token"]
+    demo_response = access_request(client, tenant_demo_token)
+
+    assert demo_response.status_code == 200
+
+    valid_right = client.post(
+        "/rights/create",
+        headers=OTHER_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-778",
+            "owner_id": "user-777",
+            "valid": True,
+        },
+    )
+    assert valid_right.status_code == 200
+
+    for i in range(5):
+        token_response = client.post(
+            "/token/issue",
+            headers=OTHER_HEADERS,
+            json={
+                "tenant_id": "tenant-other",
+                "right_id": "right-778",
+                "user_id": "user-777",
+                "device_id": "gate-X1",
+                "scope": "access",
+            },
+        )
+        assert token_response.status_code == 200
+
+        other_token = token_response.json()["token"]
+
+        other_response = client.post(
+            "/request/access",
+            headers=OTHER_HEADERS,
+            json={
+                "token": other_token,
+                "request_type": "access",
+                "device_id": "gate-X1",
+                "ip_address": f"10.0.1.{i + 1}",
+                "country_code": "EE",
+            },
+        )
+        assert other_response.status_code == 200
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": 1,
+        },
+    )
+
+    assert response.status_code == 200
+
+    items = response.json()
+
+    assert len(items) == 1
+    assert items[0]["tenant_id"] == "tenant-demo"
