@@ -1,3 +1,4 @@
+from datetime import datetime
 from tests.test_smoke import ADMIN_HEADERS, ensure_setup, issue_token, access_request
 from app.database import SessionLocal
 from app.main import (
@@ -9043,3 +9044,180 @@ def test_load_policy_version_restores_historical_business_hours(client):
     assert version_1 is not None
     assert version_1.allowed_start_hour == 8
     assert version_1.allowed_end_hour == 18
+
+def test_load_policy_version_restores_historical_effect(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-effect",
+            "effect": "allow",
+            "priority": 10,
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"effect": "deny"},
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(db, "tenant-demo", policy_id, 1)
+        version_2 = load_policy_version(db, "tenant-demo", policy_id, 2)
+
+    assert version_1 is not None
+    assert version_2 is not None
+    assert version_1.effect == "allow"
+    assert version_2.effect == "deny"
+
+
+def test_load_policy_version_restores_historical_valid_from(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-valid-from",
+            "effect": "allow",
+            "priority": 10,
+            "valid_from": "2026-09-01T08:00:00Z",
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"valid_from": "2026-09-02T08:00:00Z"},
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(db, "tenant-demo", policy_id, 1)
+
+    assert version_1 is not None
+    assert version_1.valid_from == datetime(2026, 9, 1, 8, 0, 0)
+
+
+def test_load_policy_version_restores_historical_expires_at(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-expires-at",
+            "effect": "allow",
+            "priority": 10,
+            "expires_at": "2026-09-10T18:00:00Z",
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"expires_at": "2026-09-11T18:00:00Z"},
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(db, "tenant-demo", policy_id, 1)
+
+    assert version_1 is not None
+    assert version_1.expires_at == datetime(2026, 9, 10, 18, 0, 0)
+
+
+def test_load_policy_version_restores_historical_temporal_window(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-temporal-window",
+            "effect": "allow",
+            "priority": 10,
+            "valid_from": "2026-09-01T08:00:00Z",
+            "expires_at": "2026-09-10T18:00:00Z",
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "valid_from": "2026-09-02T08:00:00Z",
+            "expires_at": "2026-09-12T18:00:00Z",
+        },
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(db, "tenant-demo", policy_id, 1)
+
+    assert version_1 is not None
+    assert version_1.valid_from == datetime(2026, 9, 1, 8, 0, 0)
+    assert version_1.expires_at == datetime(2026, 9, 10, 18, 0, 0)
+
+
+def test_load_policy_version_current_and_history_keep_separate_temporal_values(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-current-temporal-parity",
+            "effect": "allow",
+            "priority": 10,
+            "valid_from": "2026-09-01T08:00:00Z",
+            "expires_at": "2026-09-10T18:00:00Z",
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "valid_from": "2026-09-03T09:00:00Z",
+            "expires_at": "2026-09-15T20:00:00Z",
+        },
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        historical = load_policy_version(db, "tenant-demo", policy_id, 1)
+        current = load_policy_version(db, "tenant-demo", policy_id, 2)
+
+    assert historical is not None
+    assert current is not None
+
+    assert historical.valid_from == datetime(2026, 9, 1, 8, 0, 0)
+    assert historical.expires_at == datetime(2026, 9, 10, 18, 0, 0)
+
+    assert current.valid_from == datetime(2026, 9, 3, 9, 0, 0)
+    assert current.expires_at == datetime(2026, 9, 15, 20, 0, 0)
