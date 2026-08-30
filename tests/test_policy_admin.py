@@ -6919,3 +6919,125 @@ def test_list_policies_excludes_deleted_policy(client):
     ids = [item["id"] for item in response.json()]
 
     assert policy_id not in ids
+
+def test_create_policy_requires_admin_authentication(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "unauthorized-create-policy",
+            "effect": "allow",
+            "priority": 10,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_create_policy_rejects_invalid_admin_api_key(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers={"X-Admin-Api-Key": "wrong-admin-key"},
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-admin-create-policy",
+            "effect": "allow",
+            "priority": 10,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_update_policy_requires_admin_authentication(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "unauthorized-update-policy",
+            "effect": "allow",
+            "priority": 10,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        json={"priority": 20},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_update_policy_rejects_invalid_admin_api_key(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-admin-update-policy",
+            "effect": "allow",
+            "priority": 10,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers={"X-Admin-Api-Key": "wrong-admin-key"},
+        json={"priority": 20},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_delete_policy_requires_admin_authentication(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "unauthorized-delete-policy",
+            "effect": "allow",
+            "priority": 10,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.delete(
+        f"/admin/policies/{policy_id}",
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
