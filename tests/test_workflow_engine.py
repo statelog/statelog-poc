@@ -1,5 +1,7 @@
 from app.workflow_engine import WorkflowEngine
-
+from app.database import SessionLocal
+from app.main import save_workflow_config_history
+from app.models import WorkflowConfigRecord, WorkflowConfigHistory
 
 def test_workflow_engine_policy_match_allow():
     engine = WorkflowEngine()
@@ -742,3 +744,142 @@ def test_load_workflow_config_version_isolates_tenants(client):
     assert correct_tenant.include_policy_step is True
 
     assert wrong_tenant is None
+
+def test_save_workflow_config_history_preserves_identity_fields():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-history-490",
+            version=3,
+            include_risk_step=True,
+            include_policy_step=True,
+            execution_mode="risk_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        history = (
+            db.query(WorkflowConfigHistory)
+            .filter_by(
+                tenant_id="tenant-workflow-history-490",
+                version=3,
+            )
+            .one()
+        )
+
+        assert history.tenant_id == "tenant-workflow-history-490"
+        assert history.version == 3
+
+
+def test_save_workflow_config_history_preserves_risk_step():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-history-491",
+            version=2,
+            include_risk_step=False,
+            include_policy_step=True,
+            execution_mode="policy_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        history = (
+            db.query(WorkflowConfigHistory)
+            .filter_by(
+                tenant_id="tenant-workflow-history-491",
+                version=2,
+            )
+            .one()
+        )
+
+        assert history.include_risk_step is False
+
+
+def test_save_workflow_config_history_preserves_policy_step():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-history-492",
+            version=2,
+            include_risk_step=True,
+            include_policy_step=False,
+            execution_mode="risk_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        history = (
+            db.query(WorkflowConfigHistory)
+            .filter_by(
+                tenant_id="tenant-workflow-history-492",
+                version=2,
+            )
+            .one()
+        )
+
+        assert history.include_policy_step is False
+
+
+def test_save_workflow_config_history_preserves_execution_mode():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-history-493",
+            version=4,
+            include_risk_step=True,
+            include_policy_step=True,
+            execution_mode="policy_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        history = (
+            db.query(WorkflowConfigHistory)
+            .filter_by(
+                tenant_id="tenant-workflow-history-493",
+                version=4,
+            )
+            .one()
+        )
+
+        assert history.execution_mode == "policy_first"
+
+
+def test_save_workflow_config_history_preserves_complete_snapshot():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-history-494",
+            version=5,
+            include_risk_step=False,
+            include_policy_step=True,
+            execution_mode="policy_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        history = (
+            db.query(WorkflowConfigHistory)
+            .filter_by(
+                tenant_id="tenant-workflow-history-494",
+                version=5,
+            )
+            .one()
+        )
+
+        assert history.tenant_id == "tenant-workflow-history-494"
+        assert history.version == 5
+        assert history.include_risk_step is False
+        assert history.include_policy_step is True
+        assert history.execution_mode == "policy_first"
