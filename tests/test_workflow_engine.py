@@ -1,6 +1,6 @@
 from app.workflow_engine import WorkflowEngine
 from app.database import SessionLocal
-from app.main import save_workflow_config_history
+from app.main import save_workflow_config_history, load_workflow_config_version
 from app.models import WorkflowConfigRecord, WorkflowConfigHistory
 
 def test_workflow_engine_policy_match_allow():
@@ -883,3 +883,129 @@ def test_save_workflow_config_history_preserves_complete_snapshot():
         assert history.include_risk_step is False
         assert history.include_policy_step is True
         assert history.execution_mode == "policy_first"
+
+def test_workflow_history_round_trip_preserves_risk_step():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-round-trip-495",
+            version=2,
+            include_risk_step=False,
+            include_policy_step=True,
+            execution_mode="policy_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        restored = load_workflow_config_version(
+            db,
+            "tenant-workflow-round-trip-495",
+            2,
+        )
+
+    assert restored is not None
+    assert restored.include_risk_step is False
+
+
+def test_workflow_history_round_trip_preserves_policy_step():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-round-trip-496",
+            version=3,
+            include_risk_step=True,
+            include_policy_step=False,
+            execution_mode="risk_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        restored = load_workflow_config_version(
+            db,
+            "tenant-workflow-round-trip-496",
+            3,
+        )
+
+    assert restored is not None
+    assert restored.include_policy_step is False
+
+
+def test_workflow_history_round_trip_preserves_risk_first_mode():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-round-trip-497",
+            version=4,
+            include_risk_step=True,
+            include_policy_step=True,
+            execution_mode="risk_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        restored = load_workflow_config_version(
+            db,
+            "tenant-workflow-round-trip-497",
+            4,
+        )
+
+    assert restored is not None
+    assert restored.execution_mode == "risk_first"
+
+
+def test_workflow_history_round_trip_preserves_policy_first_mode():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-round-trip-498",
+            version=5,
+            include_risk_step=True,
+            include_policy_step=True,
+            execution_mode="policy_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        restored = load_workflow_config_version(
+            db,
+            "tenant-workflow-round-trip-498",
+            5,
+        )
+
+    assert restored is not None
+    assert restored.execution_mode == "policy_first"
+
+
+def test_workflow_history_round_trip_preserves_complete_config():
+    with SessionLocal() as db:
+        record = WorkflowConfigRecord(
+            tenant_id="tenant-workflow-round-trip-499",
+            version=6,
+            include_risk_step=False,
+            include_policy_step=True,
+            execution_mode="policy_first",
+        )
+        db.add(record)
+        db.flush()
+
+        save_workflow_config_history(db, record)
+        db.commit()
+
+        restored = load_workflow_config_version(
+            db,
+            "tenant-workflow-round-trip-499",
+            6,
+        )
+
+    assert restored is not None
+    assert restored.include_risk_step is False
+    assert restored.include_policy_step is True
+    assert restored.execution_mode == "policy_first"
