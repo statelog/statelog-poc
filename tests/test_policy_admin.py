@@ -1,6 +1,7 @@
 from datetime import datetime
 from tests.test_smoke import ADMIN_HEADERS, ensure_setup, issue_token, access_request
 from app.database import SessionLocal
+from app.models import PolicyHistory
 from app.main import (
     PolicyRecord,
     RequestLog,
@@ -9221,3 +9222,131 @@ def test_load_policy_version_current_and_history_keep_separate_temporal_values(c
 
     assert current.valid_from == datetime(2026, 9, 3, 9, 0, 0)
     assert current.expires_at == datetime(2026, 9, 15, 20, 0, 0)
+
+def test_load_policy_version_normalizes_historical_request_types(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyHistory(
+                policy_id=475001,
+                tenant_id="tenant-demo",
+                policy_name="legacy-request-types",
+                version=1,
+                effect="allow",
+                priority=10,
+                request_types=" access, ,ownership_transfer, ",
+                countries="",
+                device_ids="",
+            )
+        )
+        db.commit()
+
+        policy = load_policy_version(db, "tenant-demo", 475001, 1)
+
+    assert policy is not None
+    assert policy.request_types == ("access", "ownership_transfer")
+
+
+def test_load_policy_version_normalizes_historical_countries(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyHistory(
+                policy_id=476001,
+                tenant_id="tenant-demo",
+                policy_name="legacy-countries",
+                version=1,
+                effect="allow",
+                priority=10,
+                request_types="",
+                countries=" EE, FI, ,SE ",
+                device_ids="",
+            )
+        )
+        db.commit()
+
+        policy = load_policy_version(db, "tenant-demo", 476001, 1)
+
+    assert policy is not None
+    assert policy.countries == ("EE", "FI", "SE")
+
+
+def test_load_policy_version_normalizes_historical_device_ids(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyHistory(
+                policy_id=477001,
+                tenant_id="tenant-demo",
+                policy_name="legacy-device-ids",
+                version=1,
+                effect="allow",
+                priority=10,
+                request_types="",
+                countries="",
+                device_ids=" gate-A1, ,gate-B2, ",
+            )
+        )
+        db.commit()
+
+        policy = load_policy_version(db, "tenant-demo", 477001, 1)
+
+    assert policy is not None
+    assert policy.device_ids == ("gate-A1", "gate-B2")
+
+
+def test_load_policy_version_normalizes_all_historical_csv_fields(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyHistory(
+                policy_id=478001,
+                tenant_id="tenant-demo",
+                policy_name="legacy-all-csv",
+                version=1,
+                effect="deny",
+                priority=5,
+                request_types=" access, ,ownership_transfer ",
+                countries=" EE, ,FI ",
+                device_ids=" gate-A1, ,gate-B2 ",
+            )
+        )
+        db.commit()
+
+        policy = load_policy_version(db, "tenant-demo", 478001, 1)
+
+    assert policy is not None
+    assert policy.request_types == ("access", "ownership_transfer")
+    assert policy.countries == ("EE", "FI")
+    assert policy.device_ids == ("gate-A1", "gate-B2")
+
+
+def test_load_policy_version_historical_empty_csv_fields_become_empty_tuples(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            PolicyHistory(
+                policy_id=479001,
+                tenant_id="tenant-demo",
+                policy_name="legacy-empty-csv",
+                version=1,
+                effect="allow",
+                priority=10,
+                request_types=" , , ",
+                countries="",
+                device_ids="   ",
+            )
+        )
+        db.commit()
+
+        policy = load_policy_version(db, "tenant-demo", 479001, 1)
+
+    assert policy is not None
+    assert policy.request_types == ()
+    assert policy.countries == ()
+    assert policy.device_ids == ()
