@@ -83,10 +83,10 @@ class PolicySimulationRequest(BaseModel):
     request_type: str
     device_id: str
     country_code: str
-    risk_score: int
-    trust_score: Optional[int] = None
+    risk_score: int = Field(ge=0, le=100)
+    trust_score: Optional[int] = Field(default=None, ge=0, le=100)
     transaction_amount: Optional[float] = None
-    hour: Optional[int] = None
+    hour: Optional[int] = Field(default=None, ge=0, le=23)
 
 class PolicyCreate(BaseModel):
     tenant_id: str

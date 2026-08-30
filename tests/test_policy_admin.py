@@ -7292,3 +7292,95 @@ def test_admin_policy_simulation_rejects_invalid_hour_type(client):
     )
 
     assert response.status_code == 422
+
+def test_admin_policy_simulation_rejects_negative_risk_score(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_risk_score_above_one_hundred(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 101,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_negative_trust_score(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_trust_score_above_one_hundred(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "trust_score": 101,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_hour_above_twenty_three(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+            "hour": 24,
+        },
+    )
+
+    assert response.status_code == 422
