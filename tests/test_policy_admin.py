@@ -1,7 +1,6 @@
 from tests.test_smoke import ADMIN_HEADERS, ensure_setup, issue_token, access_request
 from app.database import SessionLocal
-from app.models import PolicyRecord, RequestLog
-
+from app.main import PolicyRecord, RequestLog, load_tenant_policies
 def test_create_policy(client):
     ensure_setup(client)
 
@@ -8711,3 +8710,162 @@ def test_update_policy_accepts_equal_instants_with_different_timezones(client):
 
     assert policy["valid_from"] == "2026-09-01T12:00:00"
     assert policy["expires_at"] == "2026-09-01T12:00:00"
+
+def test_load_tenant_policies_loads_only_enabled_policies():
+    with SessionLocal() as db:
+        enabled = PolicyRecord(
+            tenant_id="tenant-loader-enabled",
+            name="enabled-policy",
+            effect="allow",
+            priority=10,
+            request_types="access",
+            countries="EE",
+            device_ids="gate-A1",
+            enabled=True,
+        )
+        disabled = PolicyRecord(
+            tenant_id="tenant-loader-enabled",
+            name="disabled-policy",
+            effect="deny",
+            priority=100,
+            request_types="access",
+            countries="EE",
+            device_ids="gate-A1",
+            enabled=False,
+        )
+        db.add_all([enabled, disabled])
+        db.commit()
+
+        engine = load_tenant_policies(db, "tenant-loader-enabled")
+
+        assert len(engine.policies) == 1
+        assert engine.policies[0].name == "enabled-policy"
+
+
+def test_load_tenant_policies_isolates_tenants():
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                PolicyRecord(
+                    tenant_id="tenant-loader-a",
+                    name="tenant-a-policy",
+                    effect="allow",
+                    priority=10,
+                    request_types="access",
+                    countries="EE",
+                    device_ids="",
+                    enabled=True,
+                ),
+                PolicyRecord(
+                    tenant_id="tenant-loader-b",
+                    name="tenant-b-policy",
+                    effect="deny",
+                    priority=100,
+                    request_types="access",
+                    countries="EE",
+                    device_ids="",
+                    enabled=True,
+                ),
+            ]
+        )
+        db.commit()
+
+        engine = load_tenant_policies(db, "tenant-loader-a")
+
+        assert len(engine.policies) == 1
+        assert engine.policies[0].name == "tenant-a-policy"
+
+
+def test_load_tenant_policies_normalizes_csv_fields():
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-loader-csv",
+                name="csv-policy",
+                effect="allow",
+                priority=10,
+                request_types=" access, ,ownership_transfer, ",
+                countries=" EE, FI, ,",
+                device_ids=" gate-A1, ,gate-B2 ",
+                enabled=True,
+            )
+        )
+        db.commit()
+
+        engine = load_tenant_policies(db, "tenant-loader-csv")
+        policy = engine.policies[0]
+
+        assert policy.request_types == ("access", "ownership_transfer")
+        assert policy.countries == ("EE", "FI")
+        assert policy.device_ids == ("gate-A1", "gate-B2")
+
+
+def test_load_tenant_policies_preserves_policy_constraints():
+    with SessionLocal() as db:
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-loader-constraints",
+                name="constraint-policy",
+                effect="deny",
+                priority=42,
+                version=3,
+                request_types="ownership_transfer",
+                countries="FI",
+                device_ids="gate-Z9",
+                max_risk_score=75,
+                min_trust_score=25,
+                max_transaction_amount=500.0,
+                allowed_start_hour=8,
+                allowed_end_hour=18,
+                enabled=True,
+            )
+        )
+        db.commit()
+
+        engine = load_tenant_policies(db, "tenant-loader-constraints")
+        policy = engine.policies[0]
+
+        assert policy.effect == "deny"
+        assert policy.priority == 42
+        assert policy.version == 3
+        assert policy.max_risk_score == 75
+        assert policy.min_trust_score == 25
+        assert policy.max_transaction_amount == 500.0
+        assert policy.allowed_start_hour == 8
+        assert policy.allowed_end_hour == 18
+
+
+def test_load_tenant_policies_preserves_priority_order():
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                PolicyRecord(
+                    tenant_id="tenant-loader-order",
+                    name="lower-priority",
+                    effect="allow",
+                    priority=100,
+                    request_types="access",
+                    countries="EE",
+                    device_ids="",
+                    enabled=True,
+                ),
+                PolicyRecord(
+                    tenant_id="tenant-loader-order",
+                    name="higher-priority",
+                    effect="deny",
+                    priority=10,
+                    request_types="access",
+                    countries="EE",
+                    device_ids="",
+                    enabled=True,
+                ),
+            ]
+        )
+        db.commit()
+
+        engine = load_tenant_policies(db, "tenant-loader-order")
+
+        assert [policy.name for policy in engine.policies] == [
+            "higher-priority",
+            "lower-priority",
+        ]
