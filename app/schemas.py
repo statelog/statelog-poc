@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 class TenantCreate(BaseModel):
@@ -115,6 +115,16 @@ class PolicyCreate(BaseModel):
     enabled: bool = True
     valid_from: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_time_window(self):
+        if (
+            self.valid_from is not None
+            and self.expires_at is not None
+            and self.valid_from > self.expires_at
+        ):
+            raise ValueError("valid_from_must_not_be_after_expires_at")
+        return self
 
 class PolicyUpdate(BaseModel):
     effect: Optional[Literal["allow", "deny"]] = None

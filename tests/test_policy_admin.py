@@ -8276,3 +8276,122 @@ def test_create_policy_rejects_whitespace_device_id_item(client):
     )
 
     assert response.status_code == 422
+
+def test_create_policy_rejects_valid_from_after_expires_at(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-policy-window",
+            "effect": "allow",
+            "valid_from": "2026-09-02T12:00:00",
+            "expires_at": "2026-09-01T12:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_accepts_equal_valid_from_and_expires_at(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "equal-policy-window",
+            "effect": "allow",
+            "valid_from": "2026-09-01T12:00:00",
+            "expires_at": "2026-09-01T12:00:00",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_update_policy_rejects_valid_from_after_existing_expires_at(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-invalid-valid-from-window",
+            "effect": "allow",
+            "valid_from": "2026-09-01T12:00:00",
+            "expires_at": "2026-09-10T12:00:00",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "valid_from": "2026-09-11T12:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_expires_at_before_existing_valid_from(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-invalid-expires-window",
+            "effect": "allow",
+            "valid_from": "2026-09-05T12:00:00",
+            "expires_at": "2026-09-10T12:00:00",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "expires_at": "2026-09-04T12:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_accepts_equal_valid_from_and_expires_at(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-equal-policy-window",
+            "effect": "allow",
+            "valid_from": "2026-09-01T12:00:00",
+            "expires_at": "2026-09-10T12:00:00",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "valid_from": "2026-09-10T12:00:00",
+        },
+    )
+
+    assert response.status_code == 200

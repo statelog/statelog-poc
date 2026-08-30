@@ -703,6 +703,27 @@ def update_policy(
     if payload.enabled is not None:
         policy.enabled = payload.enabled
 
+    effective_valid_from = (
+        payload.valid_from
+        if payload.valid_from is not None
+        else policy.valid_from
+    )
+    effective_expires_at = (
+        payload.expires_at
+        if payload.expires_at is not None
+        else policy.expires_at
+    )
+
+    if (
+        effective_valid_from is not None
+        and effective_expires_at is not None
+        and effective_valid_from > effective_expires_at
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="valid_from_must_not_be_after_expires_at",
+        )
+
     if payload.valid_from is not None:
         policy.valid_from = payload.valid_from
 
