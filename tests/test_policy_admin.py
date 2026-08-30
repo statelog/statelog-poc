@@ -1,6 +1,11 @@
 from tests.test_smoke import ADMIN_HEADERS, ensure_setup, issue_token, access_request
 from app.database import SessionLocal
-from app.main import PolicyRecord, RequestLog, load_tenant_policies
+from app.main import (
+    PolicyRecord,
+    RequestLog,
+    load_tenant_policies,
+    load_policy_version,
+)
 def test_create_policy(client):
     ensure_setup(client)
 
@@ -8869,3 +8874,172 @@ def test_load_tenant_policies_preserves_priority_order():
             "higher-priority",
             "lower-priority",
         ]
+
+def test_load_policy_version_restores_historical_request_types(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-request-types",
+            "effect": "allow",
+            "priority": 10,
+            "request_types": ["access", "ownership_transfer"],
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"request_types": ["access"]},
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(db, "tenant-demo", policy_id, 1)
+
+    assert version_1 is not None
+    assert version_1.request_types == ("access", "ownership_transfer")
+
+
+def test_load_policy_version_restores_historical_countries(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-countries",
+            "effect": "allow",
+            "priority": 10,
+            "countries": ["EE", "FI"],
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"countries": ["SE"]},
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(db, "tenant-demo", policy_id, 1)
+
+    assert version_1 is not None
+    assert version_1.countries == ("EE", "FI")
+
+
+def test_load_policy_version_restores_historical_device_ids(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-device-ids",
+            "effect": "allow",
+            "priority": 10,
+            "device_ids": ["gate-A1", "gate-B2"],
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"device_ids": ["gate-C3"]},
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(db, "tenant-demo", policy_id, 1)
+
+    assert version_1 is not None
+    assert version_1.device_ids == ("gate-A1", "gate-B2")
+
+
+def test_load_policy_version_restores_historical_risk_and_trust_limits(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-risk-trust",
+            "effect": "deny",
+            "priority": 10,
+            "max_risk_score": 60,
+            "min_trust_score": 40,
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "max_risk_score": 80,
+            "min_trust_score": 20,
+        },
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(db, "tenant-demo", policy_id, 1)
+
+    assert version_1 is not None
+    assert version_1.max_risk_score == 60
+    assert version_1.min_trust_score == 40
+
+
+def test_load_policy_version_restores_historical_business_hours(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "history-business-hours",
+            "effect": "allow",
+            "priority": 10,
+            "allowed_start_hour": 8,
+            "allowed_end_hour": 18,
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "allowed_start_hour": 22,
+            "allowed_end_hour": 6,
+        },
+    )
+    assert updated.status_code == 200
+
+    with SessionLocal() as db:
+        version_1 = load_policy_version(db, "tenant-demo", policy_id, 1)
+
+    assert version_1 is not None
+    assert version_1.allowed_start_hour == 8
+    assert version_1.allowed_end_hour == 18
