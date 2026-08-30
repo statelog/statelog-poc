@@ -6502,3 +6502,181 @@ def test_admin_audit_logs_rejects_non_integer_offset(client):
     )
 
     assert response.status_code == 422
+
+def test_admin_audit_log_count_filters_by_tenant(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] >= 1
+
+
+def test_admin_audit_log_count_filters_by_policy_name(client):
+    ensure_setup(client)
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "policy-that-does-not-exist",
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
+
+
+def test_admin_audit_log_count_filters_by_policy_version(client):
+    ensure_setup(client)
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": 999999,
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
+
+
+def test_admin_audit_log_count_filters_by_min_risk_score(client):
+    ensure_setup(client)
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "min_risk_score": 101,
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
+
+
+def test_admin_audit_log_count_filters_by_risk_signal(client):
+    ensure_setup(client)
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "signal-that-does-not-exist",
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
+
+def test_admin_audit_log_count_filters_by_from_time(client):
+    ensure_setup(client)
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2999-01-01T00:00:00",
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
+
+
+def test_admin_audit_log_count_filters_by_to_time(client):
+    ensure_setup(client)
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "to_time": "2000-01-01T00:00:00",
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
+
+
+def test_admin_audit_log_count_filters_by_time_range(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2020-01-01T00:00:00",
+            "to_time": "2999-01-01T00:00:00",
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] >= 1
+
+
+def test_admin_audit_log_count_combines_tenant_and_allowed_filters(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+
+    expected_allowed = response.json()["allow"]
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "allowed": expected_allowed,
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] >= 1
+
+
+def test_admin_audit_log_count_combines_filters_with_no_match(client):
+    ensure_setup(client)
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "allowed": True,
+            "policy_name": "policy-that-does-not-exist",
+            "min_risk_score": 101,
+            "risk_signal": "signal-that-does-not-exist",
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
