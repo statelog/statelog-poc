@@ -186,16 +186,21 @@ class PolicyEngine:
             if hour is None:
                 return False
 
-            if (
-                policy.allowed_start_hour is not None
-                and hour < policy.allowed_start_hour
-            ):
-                return False
+            start = policy.allowed_start_hour
+            end = policy.allowed_end_hour
 
-            if (
-                policy.allowed_end_hour is not None
-                and hour >= policy.allowed_end_hour
-            ):
-                return False
+            if start is not None and end is not None:
+                if start < end:
+                    if hour < start or hour >= end:
+                        return False
+                elif start > end:
+                    if hour < start and hour >= end:
+                        return False
+            elif start is not None:
+                if hour < start:
+                    return False
+            elif end is not None:
+                if hour >= end:
+                    return False
 
         return True

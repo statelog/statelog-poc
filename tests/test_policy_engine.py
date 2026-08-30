@@ -677,3 +677,93 @@ def test_equal_priority_effect_and_name_is_independent_of_input_order():
     assert second.matched is True
     assert first.policy_id == second.policy_id
     assert first.policy_version == second.policy_version
+
+def test_policy_time_window_allows_hour_at_start_boundary():
+    policy = Policy(
+        name="day-window",
+        effect="allow",
+        allowed_start_hour=8,
+        allowed_end_hour=18,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 8},
+    ) is True
+
+def test_policy_time_window_rejects_hour_at_end_boundary():
+    policy = Policy(
+        name="day-window",
+        effect="allow",
+        allowed_start_hour=8,
+        allowed_end_hour=18,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 18},
+    ) is False
+
+def test_policy_overnight_window_allows_hour_after_start():
+    policy = Policy(
+        name="overnight-window",
+        effect="allow",
+        allowed_start_hour=22,
+        allowed_end_hour=6,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 23},
+    ) is True
+
+def test_policy_overnight_window_allows_hour_before_end():
+    policy = Policy(
+        name="overnight-window",
+        effect="allow",
+        allowed_start_hour=22,
+        allowed_end_hour=6,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 5},
+    ) is True
+
+def test_policy_overnight_window_rejects_hour_outside_window():
+    policy = Policy(
+        name="overnight-window",
+        effect="allow",
+        allowed_start_hour=22,
+        allowed_end_hour=6,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 12},
+    ) is False
