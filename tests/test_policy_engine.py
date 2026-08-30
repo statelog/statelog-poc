@@ -950,3 +950,93 @@ def test_policy_end_only_allows_midnight():
         trust_score=90,
         context={"hour": 0},
     ) is True
+
+def test_policy_max_risk_score_allows_exact_boundary():
+    policy = Policy(
+        name="risk-boundary",
+        effect="allow",
+        max_risk_score=50,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=50,
+        trust_score=90,
+        context={},
+    ) is True
+
+
+def test_policy_max_risk_score_rejects_above_boundary():
+    policy = Policy(
+        name="risk-boundary",
+        effect="allow",
+        max_risk_score=50,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=51,
+        trust_score=90,
+        context={},
+    ) is False
+
+
+def test_policy_min_trust_score_allows_exact_boundary():
+    policy = Policy(
+        name="trust-boundary",
+        effect="allow",
+        min_trust_score=60,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=60,
+        context={},
+    ) is True
+
+
+def test_policy_min_trust_score_rejects_below_boundary():
+    policy = Policy(
+        name="trust-boundary",
+        effect="allow",
+        min_trust_score=60,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=59,
+        context={},
+    ) is False
+
+
+def test_policy_combined_risk_and_trust_boundaries_match():
+    policy = Policy(
+        name="risk-trust-boundary",
+        effect="allow",
+        max_risk_score=50,
+        min_trust_score=60,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=50,
+        trust_score=60,
+        context={},
+    ) is True
