@@ -1664,3 +1664,141 @@ def test_empty_policy_effect_falls_through_to_valid_policy():
     assert decision.matched is True
     assert decision.allow is False
     assert decision.policy_name == "valid-deny"
+
+def test_policy_engine_handles_unknown_effect_during_sorting():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="unknown-effect",
+                effect="audit",
+                priority=100,
+            ),
+            Policy(
+                name="valid-allow",
+                effect="allow",
+                priority=10,
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "valid-allow"
+
+
+def test_policy_engine_handles_empty_effect_during_sorting():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="empty-effect",
+                effect="",
+                priority=100,
+            ),
+            Policy(
+                name="valid-deny",
+                effect="deny",
+                priority=10,
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is False
+    assert decision.policy_name == "valid-deny"
+
+
+def test_policy_engine_unknown_effect_does_not_override_deny():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="unknown",
+                effect="audit",
+                priority=100,
+            ),
+            Policy(
+                name="deny",
+                effect="deny",
+                priority=10,
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is False
+    assert decision.policy_name == "deny"
+
+
+def test_policy_engine_effect_case_sorting_is_deterministic():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="allow-upper",
+                effect="ALLOW",
+                priority=10,
+            ),
+            Policy(
+                name="deny-mixed",
+                effect="DeNy",
+                priority=10,
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is False
+    assert decision.policy_name == "deny-mixed"
+
+
+def test_policy_engine_empty_effect_only_returns_no_match():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="empty-only",
+                effect="",
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+    )
+
+    assert decision.matched is False
+    assert decision.allow is None
+    assert decision.reason == "no_policy_match"
