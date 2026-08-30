@@ -1575,7 +1575,12 @@ def replay_audit_log(
         policy_matched=replay_policy.matched,
         policy_allowed=replay_policy.allow,
     )
-
+    replay_workflow_decision = replay_workflow_engine.evaluate(
+        risk_allowed=replay_risk.allow,
+        policy_matched=replay_policy.matched,
+        policy_allowed=replay_policy.allow,
+        final_allowed=replay_allowed,
+    )
     replay_reason = replay_risk.reason
 
     if replay_policy.matched:
@@ -1617,6 +1622,8 @@ def replay_audit_log(
             "policy_matched": replay_policy.matched,
             "policy_id": replay_policy.policy_id,
             "policy_version": replay_policy.policy_version,
+            "decision_source": replay_workflow_decision.decision_source,
+            "decision_path": list(replay_workflow_decision.decision_path),
         },
         "comparison": {
             "decision_match": replay_allowed == log.allowed,

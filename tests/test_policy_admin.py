@@ -9668,3 +9668,249 @@ def test_policy_history_round_trip_preserves_temporal_constraints(client):
     assert restored is not None
     assert restored.valid_from == valid_from
     assert restored.expires_at == expires_at
+
+def test_replay_restores_workflow_decision_source(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    trace_id = original.json()["trace_id"]
+    original_source = original.json()["explanation"]["final"]["decision_source"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+    assert len(matching) == 1
+
+    replay = client.get(
+        f"/admin/audit/logs/{matching[0]['id']}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["replayed"]["decision_source"] == original_source
+
+
+def test_replay_restores_workflow_decision_path(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    trace_id = original.json()["trace_id"]
+    original_path = original.json()["explanation"]["final"]["decision_path"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+    assert len(matching) == 1
+
+    replay = client.get(
+        f"/admin/audit/logs/{matching[0]['id']}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["replayed"]["decision_path"] == original_path
+
+
+def test_replay_restores_policy_first_workflow_path(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    trace_id = original.json()["trace_id"]
+    original_final = original.json()["explanation"]["final"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    log_id = next(
+        item["id"]
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    )
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    body = replay.json()
+
+    assert body["replayed"]["decision_source"] == original_final["decision_source"]
+    assert body["replayed"]["decision_path"] == original_final["decision_path"]
+
+
+def test_replay_restores_workflow_path_with_risk_step_disabled(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    trace_id = original.json()["trace_id"]
+    original_final = original.json()["explanation"]["final"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    log_id = next(
+        item["id"]
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    )
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    body = replay.json()
+
+    assert body["replayed"]["decision_source"] == original_final["decision_source"]
+    assert body["replayed"]["decision_path"] == original_final["decision_path"]
+
+
+def test_replay_uses_historical_workflow_for_explainability_after_config_change(client):
+    ensure_setup(client)
+
+    workflow_v1 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow_v1.status_code == 200
+    assert workflow_v1.json()["version"] == 1
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+    trace_id = original.json()["trace_id"]
+    original_final = original.json()["explanation"]["final"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    log_id = next(
+        item["id"]
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    )
+
+    workflow_v2 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+    assert workflow_v2.status_code == 200
+    assert workflow_v2.json()["version"] == 2
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    body = replay.json()
+
+    assert body["workflow"]["version"] == 1
+    assert body["workflow"]["execution_mode"] == "risk_first"
+    assert body["replayed"]["decision_source"] == original_final["decision_source"]
+    assert body["replayed"]["decision_path"] == original_final["decision_path"]
