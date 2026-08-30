@@ -8075,3 +8075,122 @@ def test_create_policy_rejects_empty_device_id_item(client):
     )
 
     assert response.status_code == 422
+
+def test_update_policy_rejects_empty_request_type_item(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-empty-request-type-item",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"request_types": [""]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_whitespace_request_type_item(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-whitespace-request-type-item",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"request_types": ["   "]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_empty_country_item(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-empty-country-item",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"countries": [""]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_whitespace_country_item(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-whitespace-country-item",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"countries": ["   "]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_empty_device_id_item(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-empty-device-id-item",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"device_ids": [""]},
+    )
+
+    assert response.status_code == 422

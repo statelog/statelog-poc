@@ -120,9 +120,9 @@ class PolicyUpdate(BaseModel):
     effect: Optional[Literal["allow", "deny"]] = None
     priority: Optional[int] = None
 
-    request_types: Optional[list[str]] = None
-    countries: Optional[list[str]] = None
-    device_ids: Optional[list[str]] = None
+    request_types: Optional[list[NonBlankStr]] = None
+    countries: Optional[list[NonBlankStr]] = None
+    device_ids: Optional[list[NonBlankStr]] = None
 
     max_risk_score: Optional[int] = Field(default=None, ge=0, le=100)
     min_trust_score: Optional[int] = Field(default=None, ge=0, le=100)
