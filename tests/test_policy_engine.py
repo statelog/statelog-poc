@@ -858,3 +858,95 @@ def test_policy_end_only_rejects_hour_at_end():
         trust_score=90,
         context={"hour": 6},
     ) is False
+
+def test_policy_equal_time_window_allows_exact_hour():
+    policy = Policy(
+        name="full-day-window",
+        effect="allow",
+        allowed_start_hour=8,
+        allowed_end_hour=8,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 8},
+    ) is True
+
+
+def test_policy_equal_time_window_allows_midnight():
+    policy = Policy(
+        name="full-day-window",
+        effect="allow",
+        allowed_start_hour=8,
+        allowed_end_hour=8,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 0},
+    ) is True
+
+
+def test_policy_equal_time_window_allows_hour_before_start():
+    policy = Policy(
+        name="full-day-window",
+        effect="allow",
+        allowed_start_hour=8,
+        allowed_end_hour=8,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 23},
+    ) is True
+
+
+def test_policy_end_only_allows_hour_before_end():
+    policy = Policy(
+        name="end-only",
+        effect="allow",
+        allowed_end_hour=6,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 5},
+    ) is True
+
+
+def test_policy_end_only_allows_midnight():
+    policy = Policy(
+        name="end-only",
+        effect="allow",
+        allowed_end_hour=6,
+    )
+
+    assert PolicyEngine._matches(
+        policy,
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"hour": 0},
+    ) is True
