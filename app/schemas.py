@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
@@ -92,6 +92,13 @@ class PolicySimulationRequest(BaseModel):
     transaction_amount: Optional[float] = Field(default=None, ge=0)
     hour: Optional[int] = Field(default=None, ge=0, le=23)
 
+def normalize_utc_naive(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
+
 NonBlankStr = Annotated[
     str,
     Field(min_length=1, pattern=r".*\S.*"),
@@ -118,6 +125,17 @@ class PolicyCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_time_window(self):
+        self.valid_from = normalize_utc_naive(self.valid_from)
+        self.expires_at = normalize_utc_naive(self.expires_at)
+
+        if (
+            self.valid_from is not None
+            and self.expires_at is not None
+            and self.valid_from > self.expires_at
+        ):
+            raise ValueError("valid_from_must_not_be_after_expires_at")
+
+        return self
         if (
             self.valid_from is not None
             and self.expires_at is not None
@@ -142,3 +160,17 @@ class PolicyUpdate(BaseModel):
     enabled: Optional[bool] = None
     valid_from: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_time_window(self):
+        self.valid_from = normalize_utc_naive(self.valid_from)
+        self.expires_at = normalize_utc_naive(self.expires_at)
+
+        if (
+            self.valid_from is not None
+            and self.expires_at is not None
+            and self.valid_from > self.expires_at
+        ):
+            raise ValueError("valid_from_must_not_be_after_expires_at")
+
+        return self

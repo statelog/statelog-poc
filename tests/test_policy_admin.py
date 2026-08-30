@@ -8395,3 +8395,154 @@ def test_update_policy_accepts_equal_valid_from_and_expires_at(client):
     )
 
     assert response.status_code == 200
+
+def test_create_policy_normalizes_utc_z_valid_from_to_naive_utc(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "timezone-z-valid-from-policy",
+            "effect": "allow",
+            "valid_from": "2026-09-01T12:00:00Z",
+        },
+    )
+
+    assert response.status_code == 200
+    policy_id = response.json()["id"]
+
+    listed = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert listed.status_code == 200
+
+    policy = next(item for item in listed.json() if item["id"] == policy_id)
+    assert policy["valid_from"] == "2026-09-01T12:00:00"
+
+
+def test_create_policy_normalizes_positive_offset_valid_from_to_naive_utc(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "timezone-positive-offset-policy",
+            "effect": "allow",
+            "valid_from": "2026-09-01T15:00:00+03:00",
+        },
+    )
+
+    assert response.status_code == 200
+    policy_id = response.json()["id"]
+
+    listed = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert listed.status_code == 200
+
+    policy = next(item for item in listed.json() if item["id"] == policy_id)
+    assert policy["valid_from"] == "2026-09-01T12:00:00"
+
+def test_create_policy_normalizes_negative_offset_expires_at_to_naive_utc(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "timezone-negative-offset-policy",
+            "effect": "allow",
+            "expires_at": "2026-09-01T08:00:00-04:00",
+        },
+    )
+
+    assert response.status_code == 200
+    policy_id = response.json()["id"]
+
+    listed = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert listed.status_code == 200
+
+    policy = next(item for item in listed.json() if item["id"] == policy_id)
+    assert policy["expires_at"] == "2026-09-01T12:00:00"
+
+
+def test_create_policy_compares_mixed_timezone_window_after_normalization(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "mixed-timezone-window-policy",
+            "effect": "allow",
+            "valid_from": "2026-09-01T15:00:00+03:00",
+            "expires_at": "2026-09-01T12:30:00Z",
+        },
+    )
+
+    assert response.status_code == 200
+    policy_id = response.json()["id"]
+
+    listed = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert listed.status_code == 200
+
+    policy = next(item for item in listed.json() if item["id"] == policy_id)
+
+    assert policy["valid_from"] == "2026-09-01T12:00:00"
+    assert policy["expires_at"] == "2026-09-01T12:30:00"
+
+
+def test_update_policy_normalizes_timezone_offset_to_naive_utc(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-timezone-policy",
+            "effect": "allow",
+            "valid_from": "2026-09-01T10:00:00",
+            "expires_at": "2026-09-10T12:00:00",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "valid_from": "2026-09-01T15:00:00+03:00",
+        },
+    )
+
+    assert response.status_code == 200
+
+    listed = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert listed.status_code == 200
+
+    policy = next(item for item in listed.json() if item["id"] == policy_id)
+    assert policy["valid_from"] == "2026-09-01T12:00:00"
