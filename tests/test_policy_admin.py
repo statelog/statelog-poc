@@ -7861,3 +7861,135 @@ def test_update_policy_rejects_negative_max_transaction_amount(client):
     )
 
     assert response.status_code == 422
+
+def test_update_policy_rejects_negative_allowed_start_hour(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-negative-start-hour-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"allowed_start_hour": -1},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_allowed_start_hour_above_twenty_three(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-high-start-hour-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"allowed_start_hour": 24},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_negative_allowed_end_hour(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-negative-end-hour-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"allowed_end_hour": -1},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_allowed_end_hour_above_twenty_three(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-high-end-hour-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"allowed_end_hour": 24},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_accepts_boundary_values(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-boundary-values-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "max_risk_score": 0,
+            "min_trust_score": 100,
+            "max_transaction_amount": 0,
+            "allowed_start_hour": 0,
+            "allowed_end_hour": 23,
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["max_risk_score"] == 0
+    assert body["min_trust_score"] == 100
+    assert body["max_transaction_amount"] == 0
+    assert body["allowed_start_hour"] == 0
+    assert body["allowed_end_hour"] == 23
