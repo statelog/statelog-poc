@@ -136,13 +136,6 @@ class PolicyCreate(BaseModel):
             raise ValueError("valid_from_must_not_be_after_expires_at")
 
         return self
-        if (
-            self.valid_from is not None
-            and self.expires_at is not None
-            and self.valid_from > self.expires_at
-        ):
-            raise ValueError("valid_from_must_not_be_after_expires_at")
-        return self
 
 class PolicyUpdate(BaseModel):
     effect: Optional[Literal["allow", "deny"]] = None
