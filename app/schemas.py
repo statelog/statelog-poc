@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 
 class TenantCreate(BaseModel):
-    tenant_id: str
+    tenant_id: str = Field(min_length=1, pattern=r".*\S.*")
     name: str
     plan: str = "starter"
     monthly_quota: int = 1000
@@ -98,7 +98,7 @@ NonBlankStr = Annotated[
 ]
 
 class PolicyCreate(BaseModel):
-    tenant_id: str
+    tenant_id: str = Field(min_length=1, pattern=r".*\S.*")
     name: str = Field(min_length=1, pattern=r".*\S.*")
     effect: Literal["allow", "deny"]
     priority: int = 100

@@ -8194,3 +8194,85 @@ def test_update_policy_rejects_empty_device_id_item(client):
     )
 
     assert response.status_code == 422
+
+def test_create_policy_rejects_empty_tenant_id(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "",
+            "name": "empty-tenant-policy",
+            "effect": "allow",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_whitespace_tenant_id(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "   ",
+            "name": "whitespace-tenant-policy",
+            "effect": "allow",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_whitespace_request_type_item(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "whitespace-request-type-policy",
+            "effect": "allow",
+            "request_types": ["   "],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_empty_country_item(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "empty-country-policy",
+            "effect": "allow",
+            "countries": [""],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_whitespace_device_id_item(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "whitespace-device-policy",
+            "effect": "allow",
+            "device_ids": ["   "],
+        },
+    )
+
+    assert response.status_code == 422
