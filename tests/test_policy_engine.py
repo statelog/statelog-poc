@@ -1133,3 +1133,160 @@ def test_policy_multiple_filters_reject_when_one_value_not_allowed():
         trust_score=90,
         context={},
     ) is False
+
+def test_policy_active_exactly_at_valid_from():
+    now = datetime(2026, 9, 1, 12, 0, 0)
+
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="starts-now",
+                effect="allow",
+                priority=10,
+                request_types=("access",),
+                valid_from=now,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"now": now},
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "starts-now"
+
+
+def test_policy_active_exactly_at_expires_at():
+    now = datetime(2026, 9, 1, 12, 0, 0)
+
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="expires-now",
+                effect="allow",
+                priority=10,
+                request_types=("access",),
+                expires_at=now,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"now": now},
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "expires-now"
+
+
+def test_future_higher_priority_policy_is_skipped_for_active_lower_priority():
+    now = datetime(2026, 9, 1, 12, 0, 0)
+
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="future-high-priority",
+                effect="deny",
+                priority=100,
+                request_types=("access",),
+                valid_from=now + timedelta(minutes=1),
+            ),
+            Policy(
+                name="active-lower-priority",
+                effect="allow",
+                priority=10,
+                request_types=("access",),
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"now": now},
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "active-lower-priority"
+
+
+def test_expired_higher_priority_policy_is_skipped_for_active_lower_priority():
+    now = datetime(2026, 9, 1, 12, 0, 0)
+
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="expired-high-priority",
+                effect="deny",
+                priority=100,
+                request_types=("access",),
+                expires_at=now - timedelta(seconds=1),
+            ),
+            Policy(
+                name="active-lower-priority",
+                effect="allow",
+                priority=10,
+                request_types=("access",),
+            ),
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"now": now},
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "active-lower-priority"
+
+
+def test_policy_active_when_valid_from_and_expires_at_equal_now():
+    now = datetime(2026, 9, 1, 12, 0, 0)
+
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="single-instant-policy",
+                effect="allow",
+                priority=10,
+                request_types=("access",),
+                valid_from=now,
+                expires_at=now,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=10,
+        trust_score=90,
+        context={"now": now},
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "single-instant-policy"
