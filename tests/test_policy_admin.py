@@ -7563,3 +7563,87 @@ def test_admin_policy_simulation_rejects_country_code_too_long(client):
     )
 
     assert response.status_code == 422
+
+def test_create_policy_rejects_negative_max_risk_score(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-negative-risk",
+            "effect": "allow",
+            "max_risk_score": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_max_risk_score_above_one_hundred(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-high-risk",
+            "effect": "allow",
+            "max_risk_score": 101,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_negative_min_trust_score(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-negative-trust",
+            "effect": "allow",
+            "min_trust_score": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_min_trust_score_above_one_hundred(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-high-trust",
+            "effect": "allow",
+            "min_trust_score": 101,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_allowed_start_hour_above_twenty_three(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-start-hour",
+            "effect": "allow",
+            "allowed_start_hour": 24,
+        },
+    )
+
+    assert response.status_code == 422

@@ -102,11 +102,11 @@ class PolicyCreate(BaseModel):
     countries: list[str] = []
     device_ids: list[str] = []
 
-    max_risk_score: Optional[int] = None
-    min_trust_score: Optional[int] = None
-    max_transaction_amount: Optional[float] = None
-    allowed_start_hour: Optional[int] = None
-    allowed_end_hour: Optional[int] = None
+    max_risk_score: Optional[int] = Field(default=None, ge=0, le=100)
+    min_trust_score: Optional[int] = Field(default=None, ge=0, le=100)
+    max_transaction_amount: Optional[float] = Field(default=None, ge=0)
+    allowed_start_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    allowed_end_hour: Optional[int] = Field(default=None, ge=0, le=23)
     enabled: bool = True
     valid_from: Optional[datetime] = None
     expires_at: Optional[datetime] = None
