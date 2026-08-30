@@ -7742,3 +7742,122 @@ def test_create_policy_accepts_boundary_values(client):
     assert body["max_transaction_amount"] == 0
     assert body["allowed_start_hour"] == 0
     assert body["allowed_end_hour"] == 23
+
+def test_update_policy_rejects_negative_max_risk_score(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-negative-risk-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"max_risk_score": -1},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_max_risk_score_above_one_hundred(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-high-risk-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"max_risk_score": 101},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_negative_min_trust_score(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-negative-trust-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"min_trust_score": -1},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_min_trust_score_above_one_hundred(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-high-trust-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"min_trust_score": 101},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_policy_rejects_negative_max_transaction_amount(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "update-negative-transaction-policy",
+            "effect": "allow",
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"max_transaction_amount": -1},
+    )
+
+    assert response.status_code == 422
