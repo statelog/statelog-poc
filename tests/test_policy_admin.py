@@ -6257,3 +6257,25 @@ def test_admin_audit_logs_filter_tenant_before_limit(client):
 
     assert len(items) == 1
     assert items[0]["tenant_id"] == "tenant-demo"
+
+def test_admin_audit_logs_requires_admin_authentication(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+def test_admin_audit_log_count_requires_admin_authentication(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
