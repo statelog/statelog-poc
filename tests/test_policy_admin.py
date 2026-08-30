@@ -7,6 +7,7 @@ from app.main import (
     RequestLog,
     load_tenant_policies,
     load_policy_version,
+    save_policy_history,
 )
 def test_create_policy(client):
     ensure_setup(client)
@@ -9350,3 +9351,163 @@ def test_load_policy_version_historical_empty_csv_fields_become_empty_tuples(cli
     assert policy.request_types == ()
     assert policy.countries == ()
     assert policy.device_ids == ()
+
+def test_save_policy_history_preserves_identity_fields(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="snapshot-identity",
+            effect="deny",
+            priority=7,
+            version=3,
+            enabled=True,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        history = (
+            db.query(PolicyHistory)
+            .filter_by(policy_id=policy_id, version=3)
+            .one()
+        )
+
+        assert history.policy_id == policy_id
+        assert history.tenant_id == "tenant-demo"
+        assert history.policy_name == "snapshot-identity"
+        assert history.version == 3
+        assert history.effect == "deny"
+        assert history.priority == 7
+
+
+def test_save_policy_history_preserves_filter_fields(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="snapshot-filters",
+            effect="allow",
+            priority=10,
+            request_types="access,ownership_transfer",
+            countries="EE,FI",
+            device_ids="gate-A1,gate-B2",
+            enabled=True,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        history = (
+            db.query(PolicyHistory)
+            .filter_by(policy_id=policy_id, version=1)
+            .one()
+        )
+
+        assert history.request_types == "access,ownership_transfer"
+        assert history.countries == "EE,FI"
+        assert history.device_ids == "gate-A1,gate-B2"
+
+
+def test_save_policy_history_preserves_risk_and_transaction_constraints(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="snapshot-constraints",
+            effect="allow",
+            priority=10,
+            max_risk_score=70,
+            min_trust_score=30,
+            max_transaction_amount=12500.0,
+            enabled=True,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        history = (
+            db.query(PolicyHistory)
+            .filter_by(policy_id=policy_id, version=1)
+            .one()
+        )
+
+        assert history.max_risk_score == 70
+        assert history.min_trust_score == 30
+        assert history.max_transaction_amount == 12500.0
+
+
+def test_save_policy_history_preserves_business_hours_and_enabled(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="snapshot-hours",
+            effect="allow",
+            priority=10,
+            allowed_start_hour=22,
+            allowed_end_hour=6,
+            enabled=False,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        history = (
+            db.query(PolicyHistory)
+            .filter_by(policy_id=policy_id, version=1)
+            .one()
+        )
+
+        assert history.allowed_start_hour == 22
+        assert history.allowed_end_hour == 6
+        assert history.enabled is False
+
+
+def test_save_policy_history_preserves_temporal_constraints(client):
+    ensure_setup(client)
+
+    valid_from = datetime(2026, 9, 1, 8, 0, 0)
+    expires_at = datetime(2026, 9, 10, 18, 0, 0)
+
+    with SessionLocal() as db:
+        policy = PolicyRecord(
+            tenant_id="tenant-demo",
+            name="snapshot-temporal",
+            effect="allow",
+            priority=10,
+            valid_from=valid_from,
+            expires_at=expires_at,
+            enabled=True,
+        )
+        db.add(policy)
+        db.flush()
+
+        policy_id = policy.id
+        save_policy_history(db, policy)
+        db.commit()
+
+        history = (
+            db.query(PolicyHistory)
+            .filter_by(policy_id=policy_id, version=1)
+            .one()
+        )
+
+        assert history.valid_from == valid_from
+        assert history.expires_at == expires_at
