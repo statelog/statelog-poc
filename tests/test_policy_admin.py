@@ -6279,3 +6279,37 @@ def test_admin_audit_log_count_requires_admin_authentication(client):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_admin"
+
+def test_replay_requires_admin_authentication(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    log_id = matching[0]["id"]
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+    )
+
+    assert replay.status_code == 401
+    assert replay.json()["detail"] == "invalid_admin"
