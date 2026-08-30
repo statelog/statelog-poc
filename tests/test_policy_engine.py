@@ -1290,3 +1290,123 @@ def test_policy_active_when_valid_from_and_expires_at_equal_now():
     assert decision.matched is True
     assert decision.allow is True
     assert decision.policy_name == "single-instant-policy"
+
+def test_policy_derives_trust_score_when_missing():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="derived-trust",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=60,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=40,
+        trust_score=None,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+
+
+def test_policy_derived_trust_score_rejects_below_minimum():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="derived-trust",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=60,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=41,
+        trust_score=None,
+    )
+
+    assert decision.matched is False
+    assert decision.reason == "no_policy_match"
+
+
+def test_policy_derived_trust_score_allows_exact_boundary():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="derived-trust-boundary",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=1,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=99,
+        trust_score=None,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+
+
+def test_policy_derived_trust_score_clamps_to_zero():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="zero-trust",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=1,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=150,
+        trust_score=None,
+    )
+
+    assert decision.matched is False
+    assert decision.reason == "no_policy_match"
+
+
+def test_explicit_trust_score_overrides_derived_value():
+    engine = PolicyEngine(
+        [
+            Policy(
+                name="explicit-trust",
+                effect="allow",
+                request_types=("access",),
+                min_trust_score=80,
+            )
+        ]
+    )
+
+    decision = engine.evaluate(
+        request_type="access",
+        device_id="device-1",
+        country_code="EE",
+        risk_score=90,
+        trust_score=90,
+    )
+
+    assert decision.matched is True
+    assert decision.allow is True
+    assert decision.policy_name == "explicit-trust"
