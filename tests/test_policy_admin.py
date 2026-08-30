@@ -7041,3 +7041,76 @@ def test_delete_policy_requires_admin_authentication(client):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_admin"
+
+def test_delete_missing_policy_returns_404(client):
+    ensure_setup(client)
+
+    response = client.delete(
+        "/admin/policies/999999",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "policy_not_found"
+
+
+def test_update_policy_rejects_non_integer_policy_id(client):
+    ensure_setup(client)
+
+    response = client.patch(
+        "/admin/policies/not-an-integer",
+        headers=ADMIN_HEADERS,
+        json={"enabled": False},
+    )
+
+    assert response.status_code == 422
+
+
+def test_delete_policy_rejects_non_integer_policy_id(client):
+    ensure_setup(client)
+
+    response = client.delete(
+        "/admin/policies/not-an-integer",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+
+def test_delete_policy_rejects_invalid_admin_api_key(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-admin-delete-policy",
+            "effect": "allow",
+            "priority": 10,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.delete(
+        f"/admin/policies/{policy_id}",
+        headers={"X-Admin-Api-Key": "wrong-admin-key"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_delete_missing_policy_requires_admin_before_lookup(client):
+    ensure_setup(client)
+
+    response = client.delete(
+        "/admin/policies/999999",
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
