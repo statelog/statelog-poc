@@ -6313,3 +6313,94 @@ def test_replay_requires_admin_authentication(client):
 
     assert replay.status_code == 401
     assert replay.json()["detail"] == "invalid_admin"
+
+def test_replay_rejects_invalid_admin_api_key(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    log_id = matching[0]["id"]
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers={"X-Admin-Api-Key": "wrong-admin-key"},
+    )
+
+    assert replay.status_code == 401
+    assert replay.json()["detail"] == "invalid_admin"
+
+def test_replay_returns_404_for_zero_log_id(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/0/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "request_log_not_found"
+
+
+def test_replay_returns_404_for_negative_log_id(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/-1/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "request_log_not_found"
+
+
+def test_replay_rejects_non_integer_log_id(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/not-a-number/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+
+def test_replay_rejects_post_method(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/audit/logs/1/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 405
+
+
+def test_replay_rejects_delete_method(client):
+    ensure_setup(client)
+
+    response = client.delete(
+        "/admin/audit/logs/1/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 405
