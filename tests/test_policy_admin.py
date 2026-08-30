@@ -7993,3 +7993,85 @@ def test_update_policy_accepts_boundary_values(client):
     assert body["max_transaction_amount"] == 0
     assert body["allowed_start_hour"] == 0
     assert body["allowed_end_hour"] == 23
+
+def test_create_policy_rejects_empty_name(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "",
+            "effect": "allow",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_whitespace_name(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "   ",
+            "effect": "allow",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_empty_request_type_item(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-request-type-item",
+            "effect": "allow",
+            "request_types": [""],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_whitespace_country_item(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-country-item",
+            "effect": "allow",
+            "countries": ["   "],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_policy_rejects_empty_device_id_item(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "invalid-device-item",
+            "effect": "allow",
+            "device_ids": [""],
+        },
+    )
+
+    assert response.status_code == 422

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -92,15 +92,20 @@ class PolicySimulationRequest(BaseModel):
     transaction_amount: Optional[float] = Field(default=None, ge=0)
     hour: Optional[int] = Field(default=None, ge=0, le=23)
 
+NonBlankStr = Annotated[
+    str,
+    Field(min_length=1, pattern=r".*\S.*"),
+]
+
 class PolicyCreate(BaseModel):
     tenant_id: str
-    name: str
+    name: str = Field(min_length=1, pattern=r".*\S.*")
     effect: Literal["allow", "deny"]
     priority: int = 100
 
-    request_types: list[str] = []
-    countries: list[str] = []
-    device_ids: list[str] = []
+    request_types: list[NonBlankStr] = []
+    countries: list[NonBlankStr] = []
+    device_ids: list[NonBlankStr] = []
 
     max_risk_score: Optional[int] = Field(default=None, ge=0, le=100)
     min_trust_score: Optional[int] = Field(default=None, ge=0, le=100)
