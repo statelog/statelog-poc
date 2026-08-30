@@ -7114,3 +7114,91 @@ def test_delete_missing_policy_requires_admin_before_lookup(client):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_admin"
+
+def test_admin_policy_simulation_requires_admin_authentication(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_admin_policy_simulation_rejects_invalid_admin_api_key(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers={"X-Admin-Api-Key": "wrong-admin-key"},
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_admin_policy_simulation_requires_tenant_id(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_requires_request_type(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": 10,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_policy_simulation_rejects_invalid_risk_score_type(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/policies/simulate",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "country_code": "EE",
+            "risk_score": "not-a-number",
+        },
+    )
+
+    assert response.status_code == 422
