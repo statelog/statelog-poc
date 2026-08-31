@@ -10629,3 +10629,133 @@ def test_replay_rejects_non_string_decision_path_items_as_match(client):
     assert replay.status_code == 200
     assert replay.json()["comparison"]["decision_path_match"] is False
     assert replay.json()["comparison"]["all_match"] is False
+
+def test_request_without_workflow_config_persists_no_workflow_version(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = db.query(RequestLog).filter_by(trace_id=trace_id).one()
+        assert log.workflow_version is None
+
+
+def test_request_without_workflow_config_replay_succeeds_without_manual_patch(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = db.query(RequestLog).filter_by(trace_id=trace_id).one()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+
+def test_request_without_workflow_config_replay_reports_no_historical_workflow(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = db.query(RequestLog).filter_by(trace_id=trace_id).one()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["workflow"] is None
+
+
+def test_request_without_workflow_config_replay_uses_default_risk_first(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = db.query(RequestLog).filter_by(trace_id=trace_id).one()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    path = replay.json()["replayed"]["decision_path"]
+
+    assert path[0] == "risk_evaluated"
+    assert path[1] == "policy_checked"
+
+
+def test_request_without_workflow_config_replay_preserves_explainability(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    original_final = original.json()["explanation"]["final"]
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = db.query(RequestLog).filter_by(trace_id=trace_id).one()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert (
+        body["replayed"]["decision_source"]
+        == original_final["decision_source"]
+    )
+    assert (
+        body["replayed"]["decision_path"]
+        == original_final["decision_path"]
+    )

@@ -1206,7 +1206,11 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         request_fingerprint=fingerprint,
         user_agent=user_agent,
         decision_version=settings.request_decision_version,
-        workflow_version=workflow_config_record.version if workflow_config_record is not None else 1,
+        workflow_version=(
+            workflow_config_record.version
+            if workflow_config_record is not None
+            else None
+        ),
     )
 
     tenant.usage_count += 1
