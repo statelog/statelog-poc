@@ -138,6 +138,8 @@ class RequestLog(Base):
     user_agent: Mapped[str] = mapped_column(String(512), default="")
     decision_version: Mapped[str] = mapped_column(String(32), default="v8")
     workflow_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    decision_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    decision_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, index=True)
 
 

@@ -1266,6 +1266,10 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         final_allowed=allowed,
     )
 
+    log.decision_source = workflow_decision.decision_source
+    log.decision_path = json.dumps(list(workflow_decision.decision_path))
+    db.commit()
+
     response = {
         "allow": allowed,
         "reason": reason,

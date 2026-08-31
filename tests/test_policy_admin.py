@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from tests.test_smoke import ADMIN_HEADERS, ensure_setup, issue_token, access_request
 from app.database import SessionLocal
@@ -10111,3 +10112,107 @@ def test_replay_without_workflow_version_reconstructs_default_explainability(cli
     assert body["workflow"] is None
     assert body["replayed"]["decision_source"] == original_final["decision_source"]
     assert body["replayed"]["decision_path"] == original_final["decision_path"]
+
+def test_request_log_persists_workflow_decision_source(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    trace_id = response.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        assert log.decision_source is not None
+        assert log.decision_source in {"risk", "policy"}
+
+
+def test_request_log_persists_workflow_decision_path(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    trace_id = response.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        assert log.decision_path is not None
+
+        path = json.loads(log.decision_path)
+
+        assert isinstance(path, list)
+        assert len(path) > 0
+
+
+def test_request_log_workflow_decision_source_matches_response(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    body = response.json()
+    trace_id = body["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        assert log.decision_source == body["explanation"]["final"]["decision_source"]
+
+
+def test_request_log_workflow_decision_path_matches_response(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    body = response.json()
+    trace_id = body["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        assert json.loads(log.decision_path) == body["explanation"]["final"]["decision_path"]
+
+
+def test_request_log_workflow_decision_path_preserves_order(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    trace_id = response.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+
+        path = json.loads(log.decision_path)
+
+        assert path[-1] in {"final_allow", "final_deny"}
