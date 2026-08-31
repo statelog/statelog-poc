@@ -10216,3 +10216,211 @@ def test_request_log_workflow_decision_path_preserves_order(client):
         path = json.loads(log.decision_path)
 
         assert path[-1] in {"final_allow", "final_deny"}
+
+def test_replay_comparison_includes_decision_source_match(client):
+    ensure_setup(client)
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+    assert len(matching) == 1
+
+    replay = client.get(
+        f"/admin/audit/logs/{matching[0]['id']}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["comparison"]["decision_source_match"] is True
+
+
+def test_replay_comparison_includes_decision_path_match(client):
+    ensure_setup(client)
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+    assert len(matching) == 1
+
+    replay = client.get(
+        f"/admin/audit/logs/{matching[0]['id']}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["comparison"]["decision_path_match"] is True
+
+
+def test_replay_comparison_detects_decision_source_mismatch(client):
+    ensure_setup(client)
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = db.query(RequestLog).filter_by(trace_id=trace_id).one()
+        log.decision_source = "tampered-source"
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["comparison"]["decision_source_match"] is False
+
+
+def test_replay_comparison_detects_decision_path_mismatch(client):
+    ensure_setup(client)
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = db.query(RequestLog).filter_by(trace_id=trace_id).one()
+        log.decision_path = json.dumps(["tampered", "final_deny"])
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["comparison"]["decision_path_match"] is False
+
+
+def test_replay_all_match_includes_workflow_explainability(client):
+    ensure_setup(client)
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    from app.database import SessionLocal
+    from app.models import RequestLog
+
+    with SessionLocal() as db:
+        log = db.query(RequestLog).filter_by(trace_id=trace_id).one()
+        log.decision_source = "tampered-source"
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    comparison = replay.json()["comparison"]
+
+    assert comparison["decision_source_match"] is False
+    assert comparison["all_match"] is False

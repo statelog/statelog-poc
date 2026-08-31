@@ -1629,24 +1629,36 @@ def replay_audit_log(
             "decision_source": replay_workflow_decision.decision_source,
             "decision_path": list(replay_workflow_decision.decision_path),
         },
-        "comparison": {
-            "decision_match": replay_allowed == log.allowed,
-            "risk_score_match": replay_risk.risk_score == log.risk_score,
-            "reason_match": replay_reason == log.reason,
-            "risk_signals_match": list(replay_risk.signals)
-            == [signal for signal in log.risk_signals.split(",") if signal],
-            "policy_match": replay_policy.policy_id == log.policy_id,
-            "policy_version_match": replay_policy.policy_version == log.policy_version,
-          "all_match": (
-              replay_allowed == log.allowed
-              and replay_risk.risk_score == log.risk_score
-              and replay_reason == log.reason
-              and list(replay_risk.signals)
-              == [signal for signal in log.risk_signals.split(",") if signal]
-              and replay_policy.policy_id == log.policy_id
-              and replay_policy.policy_version == log.policy_version
-            ),
-        },
+"comparison": {
+    "decision_match": replay_allowed == log.allowed,
+    "risk_score_match": replay_risk.risk_score == log.risk_score,
+    "reason_match": replay_reason == log.reason,
+    "risk_signals_match": list(replay_risk.signals)
+    == [signal for signal in log.risk_signals.split(",") if signal],
+    "policy_match": replay_policy.policy_id == log.policy_id,
+    "policy_version_match": replay_policy.policy_version == log.policy_version,
+    "decision_source_match": (
+        replay_workflow_decision.decision_source == log.decision_source
+    ),
+    "decision_path_match": (
+        log.decision_path is not None
+        and list(replay_workflow_decision.decision_path)
+        == json.loads(log.decision_path)
+    ),
+    "all_match": (
+        replay_allowed == log.allowed
+        and replay_risk.risk_score == log.risk_score
+        and replay_reason == log.reason
+        and list(replay_risk.signals)
+        == [signal for signal in log.risk_signals.split(",") if signal]
+        and replay_policy.policy_id == log.policy_id
+        and replay_policy.policy_version == log.policy_version
+        and replay_workflow_decision.decision_source == log.decision_source
+        and log.decision_path is not None
+        and list(replay_workflow_decision.decision_path)
+        == json.loads(log.decision_path)
+    ),
+},
 
         "workflow": None if workflow is None else {
             "version": log.workflow_version,
