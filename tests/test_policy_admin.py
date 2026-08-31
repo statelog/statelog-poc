@@ -10759,3 +10759,144 @@ def test_request_without_workflow_config_replay_preserves_explainability(client)
         body["replayed"]["decision_path"]
         == original_final["decision_path"]
     )
+
+def test_default_workflow_response_reports_version_one(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    assert response.json()["workflow_version"] == 1
+    assert response.json()["explanation"]["final"]["workflow_version"] == 1
+
+
+def test_default_workflow_audit_log_reports_no_persisted_version(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    trace_id = response.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    assert matching[0]["workflow_version"] is None
+
+
+def test_default_workflow_response_and_audit_distinguish_default_from_history(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    trace_id = response.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    assert response.json()["workflow_version"] == 1
+    assert matching[0]["workflow_version"] is None
+
+
+def test_configured_workflow_persists_real_version_in_audit_log(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+    assert workflow.json()["version"] == 1
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    trace_id = response.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    assert matching[0]["workflow_version"] == 1
+
+
+def test_configured_workflow_response_and_audit_versions_match(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    trace_id = response.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert audit.status_code == 200
+
+    matching = [
+        item
+        for item in audit.json()
+        if item["trace_id"] == trace_id
+    ]
+
+    assert len(matching) == 1
+    assert response.json()["workflow_version"] == workflow.json()["version"]
+    assert matching[0]["workflow_version"] == workflow.json()["version"]
