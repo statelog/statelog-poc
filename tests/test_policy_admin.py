@@ -9914,3 +9914,200 @@ def test_replay_uses_historical_workflow_for_explainability_after_config_change(
     assert body["workflow"]["execution_mode"] == "risk_first"
     assert body["replayed"]["decision_source"] == original_final["decision_source"]
     assert body["replayed"]["decision_path"] == original_final["decision_path"]
+
+def test_replay_without_workflow_version_returns_no_historical_workflow(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        log.workflow_version = None
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["workflow"] is None
+
+
+def test_replay_without_workflow_version_uses_default_risk_first_path(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        log.workflow_version = None
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    path = replay.json()["replayed"]["decision_path"]
+
+    assert path[0] == "risk_evaluated"
+    assert path[1] == "policy_checked"
+
+
+def test_replay_without_workflow_version_includes_final_decision_in_path(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        log.workflow_version = None
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+    expected_final = (
+        "final_allow"
+        if body["replayed"]["allow"]
+        else "final_deny"
+    )
+
+    assert body["replayed"]["decision_path"][-1] == expected_final
+
+def test_replay_without_workflow_version_ignores_current_workflow_config(client):
+    ensure_setup(client)
+
+    current_workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+    assert current_workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        log.workflow_version = None
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["workflow"] is None
+    assert body["replayed"]["decision_path"][0] == "risk_evaluated"
+    assert body["replayed"]["decision_path"][1] == "policy_checked"
+
+
+def test_replay_without_workflow_version_reconstructs_default_explainability(client):
+    ensure_setup(client)
+
+    workflow_v1 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow_v1.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    original_final = original.json()["explanation"]["final"]
+    trace_id = original.json()["trace_id"]
+
+    workflow_v2 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+    assert workflow_v2.status_code == 200
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        log.workflow_version = None
+        db.commit()
+        log_id = log.id
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    body = replay.json()
+
+    assert body["workflow"] is None
+    assert body["replayed"]["decision_source"] == original_final["decision_source"]
+    assert body["replayed"]["decision_path"] == original_final["decision_path"]
