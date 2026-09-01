@@ -10900,3 +10900,222 @@ def test_configured_workflow_response_and_audit_versions_match(client):
     assert len(matching) == 1
     assert response.json()["workflow_version"] == workflow.json()["version"]
     assert matching[0]["workflow_version"] == workflow.json()["version"]
+
+def test_audit_logs_filter_by_workflow_version(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+    assert workflow.json()["version"] == 1
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_version": 1,
+        },
+    )
+
+    assert audit.status_code == 200
+    assert len(audit.json()) >= 1
+    assert all(item["workflow_version"] == 1 for item in audit.json())
+
+
+def test_audit_logs_workflow_version_filter_excludes_other_versions(client):
+    ensure_setup(client)
+
+    workflow_v1 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow_v1.status_code == 200
+    assert workflow_v1.json()["version"] == 1
+
+    token = issue_token(client).json()["token"]
+    request_v1 = access_request(client, token)
+    assert request_v1.status_code == 200
+    trace_v1 = request_v1.json()["trace_id"]
+
+    workflow_v2 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+    assert workflow_v2.status_code == 200
+    assert workflow_v2.json()["version"] == 2
+
+    token_v2 = issue_token(client).json()["token"]
+
+    request_v2 = access_request(
+        client,
+        token_v2,
+        ip_address="10.0.0.11",
+    )
+    assert request_v2.status_code == 200
+    trace_v2 = request_v2.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_version": 1,
+        },
+    )
+
+    assert audit.status_code == 200
+
+    trace_ids = {item["trace_id"] for item in audit.json()}
+
+    assert trace_v1 in trace_ids
+    assert trace_v2 not in trace_ids
+
+
+def test_audit_logs_filter_by_second_workflow_version(client):
+    ensure_setup(client)
+
+    workflow_v1 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow_v1.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    request_v1 = access_request(client, token)
+    assert request_v1.status_code == 200
+    trace_v1 = request_v1.json()["trace_id"]
+
+    workflow_v2 = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+    assert workflow_v2.status_code == 200
+    assert workflow_v2.json()["version"] == 2
+
+    token_v2 = issue_token(client).json()["token"]
+
+    request_v2 = access_request(
+        client,
+        token_v2,
+        ip_address="10.0.0.11",
+    )
+    assert request_v2.status_code == 200
+    trace_v2 = request_v2.json()["trace_id"]
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_version": 2,
+        },
+    )
+
+    assert audit.status_code == 200
+
+    trace_ids = {item["trace_id"] for item in audit.json()}
+
+    assert trace_v2 in trace_ids
+    assert trace_v1 not in trace_ids
+    assert all(item["workflow_version"] == 2 for item in audit.json())
+
+
+def test_audit_logs_unknown_workflow_version_returns_empty_list(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_version": 999,
+        },
+    )
+
+    assert audit.status_code == 200
+    assert audit.json() == []
+
+
+def test_audit_logs_workflow_version_filter_preserves_tenant_isolation(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-other",
+            "workflow_version": 1,
+        },
+    )
+
+    assert audit.status_code == 200
+    assert all(item["tenant_id"] == "tenant-other" for item in audit.json())
