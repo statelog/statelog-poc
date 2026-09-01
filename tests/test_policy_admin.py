@@ -12194,3 +12194,226 @@ def test_audit_logs_risk_signal_underscore_exact_token_still_matches(client):
     assert audit.status_code == 200
     trace_ids = {item["trace_id"] for item in audit.json()}
     assert "risk-signal-like-exact-trace" in trace_ids
+
+def test_audit_logs_risk_signal_percent_is_literal_at_start(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-percent-start-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="riskXburst,other_signal",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-percent-start-trace",
+                idempotency_key="risk-signal-percent-start-idem",
+                request_fingerprint="risk-signal-percent-start-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "risk%burst",
+        },
+    )
+
+    assert audit.status_code == 200
+    trace_ids = {item["trace_id"] for item in audit.json()}
+    assert "risk-signal-percent-start-trace" not in trace_ids
+
+
+def test_audit_logs_risk_signal_percent_is_literal_in_middle(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-percent-middle-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="first_signal,riskXYZburst,last_signal",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-percent-middle-trace",
+                idempotency_key="risk-signal-percent-middle-idem",
+                request_fingerprint="risk-signal-percent-middle-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "risk%burst",
+        },
+    )
+
+    assert audit.status_code == 200
+    trace_ids = {item["trace_id"] for item in audit.json()}
+    assert "risk-signal-percent-middle-trace" not in trace_ids
+
+
+def test_audit_logs_risk_signal_percent_is_literal_at_end(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-percent-end-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="first_signal,risk123burst",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-percent-end-trace",
+                idempotency_key="risk-signal-percent-end-idem",
+                request_fingerprint="risk-signal-percent-end-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "risk%burst",
+        },
+    )
+
+    assert audit.status_code == 200
+    trace_ids = {item["trace_id"] for item in audit.json()}
+    assert "risk-signal-percent-end-trace" not in trace_ids
+
+
+def test_audit_log_count_risk_signal_percent_is_literal(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-percent-count-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="first_signal,riskABCburst,last_signal",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-percent-count-trace",
+                idempotency_key="risk-signal-percent-count-idem",
+                request_fingerprint="risk-signal-percent-count-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "risk%burst",
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
+
+
+def test_audit_logs_risk_signal_percent_exact_token_still_matches(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-percent-exact-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="first_signal,risk%burst,last_signal",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-percent-exact-trace",
+                idempotency_key="risk-signal-percent-exact-idem",
+                request_fingerprint="risk-signal-percent-exact-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "risk%burst",
+        },
+    )
+
+    assert audit.status_code == 200
+    trace_ids = {item["trace_id"] for item in audit.json()}
+    assert "risk-signal-percent-exact-trace" in trace_ids
