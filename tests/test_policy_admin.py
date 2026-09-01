@@ -11748,3 +11748,226 @@ def test_audit_logs_workflow_version_offset_stays_inside_filtered_results(client
     assert len(audit.json()) == 1
     assert audit.json()[0]["workflow_version"] == 2
     assert audit.json()[0]["trace_id"] != request_v1.json()["trace_id"]
+
+def test_audit_logs_risk_signal_matches_exact_token_at_start(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-start-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="exact_start,other_signal",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-start-trace",
+                idempotency_key="risk-signal-start-idem",
+                request_fingerprint="risk-signal-start-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "exact_start",
+        },
+    )
+
+    assert audit.status_code == 200
+    trace_ids = {item["trace_id"] for item in audit.json()}
+    assert "risk-signal-start-trace" in trace_ids
+
+
+def test_audit_logs_risk_signal_matches_exact_token_in_middle(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-middle-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="first_signal,exact_middle,last_signal",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-middle-trace",
+                idempotency_key="risk-signal-middle-idem",
+                request_fingerprint="risk-signal-middle-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "exact_middle",
+        },
+    )
+
+    assert audit.status_code == 200
+    trace_ids = {item["trace_id"] for item in audit.json()}
+    assert "risk-signal-middle-trace" in trace_ids
+
+
+def test_audit_logs_risk_signal_matches_exact_token_at_end(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-end-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="first_signal,exact_end",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-end-trace",
+                idempotency_key="risk-signal-end-idem",
+                request_fingerprint="risk-signal-end-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "exact_end",
+        },
+    )
+
+    assert audit.status_code == 200
+    trace_ids = {item["trace_id"] for item in audit.json()}
+    assert "risk-signal-end-trace" in trace_ids
+
+
+def test_audit_logs_risk_signal_does_not_match_substring(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-substring-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="new_ip_extra",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-substring-trace",
+                idempotency_key="risk-signal-substring-idem",
+                request_fingerprint="risk-signal-substring-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    audit = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "new_ip",
+        },
+    )
+
+    assert audit.status_code == 200
+    trace_ids = {item["trace_id"] for item in audit.json()}
+    assert "risk-signal-substring-trace" not in trace_ids
+
+
+def test_audit_log_count_risk_signal_does_not_match_substring(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="risk-signal-count-substring-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test",
+                risk_signals="count_exact_extra",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="risk-signal-count-substring-trace",
+                idempotency_key="risk-signal-count-substring-idem",
+                request_fingerprint="risk-signal-count-substring-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "count_exact",
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0

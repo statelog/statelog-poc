@@ -1428,7 +1428,12 @@ def build_audit_log_query(
 
     if risk_signal is not None:
         query = query.where(
-            RequestLog.risk_signals.contains(risk_signal)
+            (
+                (RequestLog.risk_signals == risk_signal)
+                | RequestLog.risk_signals.startswith(f"{risk_signal},")
+                | RequestLog.risk_signals.endswith(f",{risk_signal}")
+                | RequestLog.risk_signals.contains(f",{risk_signal},")
+            )
         )
 
     if from_time is not None:
