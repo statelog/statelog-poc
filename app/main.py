@@ -1430,9 +1430,18 @@ def build_audit_log_query(
         query = query.where(
             (
                 (RequestLog.risk_signals == risk_signal)
-                | RequestLog.risk_signals.startswith(f"{risk_signal},")
-                | RequestLog.risk_signals.endswith(f",{risk_signal}")
-                | RequestLog.risk_signals.contains(f",{risk_signal},")
+                | RequestLog.risk_signals.startswith(
+                    f"{risk_signal},",
+                    autoescape=True,
+                )
+                | RequestLog.risk_signals.endswith(
+                    f",{risk_signal}",
+                    autoescape=True,
+                )
+                | RequestLog.risk_signals.contains(
+                    f",{risk_signal},",
+                    autoescape=True,
+                )
             )
         )
 
