@@ -1381,6 +1381,7 @@ def build_audit_log_query(
     policy_name: str | None = None,
     policy_version: int | None = None,
     workflow_version: int | None = None,
+    workflow_configured: bool | None = None,
     min_risk_score: int | None = None,
     risk_signal: str | None = None,
     from_time: datetime | None = None,
@@ -1398,6 +1399,16 @@ def build_audit_log_query(
     if workflow_version is not None:
         query = query.where(
             RequestLog.workflow_version == workflow_version
+        )
+
+    if workflow_configured is True:
+        query = query.where(
+            RequestLog.workflow_version.is_not(None)
+        )
+
+    elif workflow_configured is False:
+        query = query.where(
+            RequestLog.workflow_version.is_(None)
         )
 
     if allowed is not None:
@@ -1439,6 +1450,7 @@ def get_audit_logs(
     policy_name: str | None = None,
     policy_version: int | None = None,
     workflow_version: int | None = None,
+    workflow_configured: bool | None = None,
     min_risk_score: int | None = None,
     risk_signal: str | None = None,
     from_time: datetime | None = None,
@@ -1457,6 +1469,7 @@ def get_audit_logs(
         policy_name=policy_name,
         policy_version=policy_version,
         workflow_version=workflow_version,
+        workflow_configured=workflow_configured,
         min_risk_score=min_risk_score,
         risk_signal=risk_signal,
         from_time=from_time,
