@@ -16665,3 +16665,81 @@ def test_admin_audit_log_count_rejects_blank_business_filters(client):
 
     assert policy_response.status_code == 422
     assert signal_response.status_code == 422
+
+def test_admin_audit_logs_rejects_blank_tenant_id(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_rejects_whitespace_tenant_id(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "   ",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_blank_tenant_id(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_whitespace_tenant_id(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "   ",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_and_count_accept_nonblank_tenant_id(client):
+    ensure_setup(client)
+
+    params = {
+        "tenant_id": "tenant-demo",
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert count.json()["total"] == len(logs.json())

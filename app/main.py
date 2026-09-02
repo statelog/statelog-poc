@@ -1461,7 +1461,7 @@ def build_audit_log_query(
 
 @app.get("/admin/audit/logs")
 def get_audit_logs(
-    tenant_id: str,
+    tenant_id: str = Query(min_length=1, pattern=r".*\S.*"),
     allowed: bool | None = None,
     policy_name: str | None = Query(default=None, min_length=1, pattern=r".*\S.*"),
     policy_version: int | None = Query(default=None, ge=1),
@@ -1752,7 +1752,7 @@ def replay_audit_log(
 
 @app.get("/admin/audit/logs/count")
 def get_audit_log_count(
-    tenant_id: str,
+    tenant_id: str = Query(min_length=1, pattern=r".*\S.*"),
     allowed: bool | None = None,
     policy_name: str | None = Query(default=None, min_length=1, pattern=r".*\S.*"),
     policy_version: int | None = Query(default=None, ge=1),
