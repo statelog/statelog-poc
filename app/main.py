@@ -1746,6 +1746,8 @@ def get_audit_log_count(
     allowed: bool | None = None,
     policy_name: str | None = None,
     policy_version: int | None = None,
+    workflow_version: int | None = Query(default=None, ge=1),
+    workflow_configured: bool | None = None,
     min_risk_score: int | None = Query(default=None, ge=0),
     risk_signal: str | None = None,
     from_time: datetime | None = None,
@@ -1762,6 +1764,8 @@ def get_audit_log_count(
         risk_signal=risk_signal,
         from_time=from_time,
         to_time=to_time,
+        workflow_version=workflow_version,
+        workflow_configured=workflow_configured,
     )
 
     total = db.scalar(

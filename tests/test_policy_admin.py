@@ -12492,3 +12492,122 @@ def test_admin_audit_log_count_rejects_negative_min_risk_score(client):
     )
 
     assert response.status_code == 422
+
+def test_admin_audit_log_count_filters_by_workflow_version(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+    assert workflow.json()["version"] == 1
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_version": 1,
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 1
+
+
+def test_admin_audit_log_count_unknown_workflow_version_returns_zero(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_version": 999,
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
+
+
+def test_admin_audit_log_count_filters_workflow_configured_false(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_configured": False,
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 1
+
+
+def test_admin_audit_log_count_filters_workflow_configured_true(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+    assert response.status_code == 200
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_configured": True,
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] == 1
+
+
+def test_admin_audit_log_count_rejects_zero_workflow_version(client):
+    ensure_setup(client)
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_version": 0,
+        },
+    )
+
+    assert count.status_code == 422
