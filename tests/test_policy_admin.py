@@ -16743,3 +16743,154 @@ def test_admin_audit_logs_and_count_accept_nonblank_tenant_id(client):
     assert logs.status_code == 200
     assert count.status_code == 200
     assert count.json()["total"] == len(logs.json())
+
+def test_admin_audit_logs_limit_above_max_is_capped_at_500(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": 501,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) <= 500
+
+
+def test_admin_audit_logs_negative_limit_normalizes_to_one(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "limit": -1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
+def test_admin_audit_logs_negative_offset_with_filter_normalizes_to_zero(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(2):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash=f"negative-offset-filter-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=10,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=True,
+                    policy_name="negative-offset-filter-policy",
+                    policy_version=1,
+                    workflow_version=None,
+                    trace_id=f"negative-offset-filter-trace-{i}",
+                    idempotency_key=f"negative-offset-filter-idem-{i}",
+                    request_fingerprint=f"negative-offset-filter-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=datetime(2030, 6, 1, 12, i, 0),
+                )
+            )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "negative-offset-filter-policy",
+            "limit": 1,
+            "offset": -100,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["trace_id"] == "negative-offset-filter-trace-1"
+
+
+def test_admin_audit_logs_zero_limit_with_offset_returns_one_item(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash=f"zero-limit-offset-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=10,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=True,
+                    policy_name="zero-limit-offset-policy",
+                    policy_version=1,
+                    workflow_version=None,
+                    trace_id=f"zero-limit-offset-trace-{i}",
+                    idempotency_key=f"zero-limit-offset-idem-{i}",
+                    request_fingerprint=f"zero-limit-offset-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=datetime(2030, 6, 2, 12, i, 0),
+                )
+            )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "zero-limit-offset-policy",
+            "limit": 0,
+            "offset": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["trace_id"] == "zero-limit-offset-trace-1"
+
+
+def test_admin_audit_logs_large_offset_returns_empty_list(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "offset": 1000000,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
