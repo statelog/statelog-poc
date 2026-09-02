@@ -12417,3 +12417,78 @@ def test_audit_logs_risk_signal_percent_exact_token_still_matches(client):
     assert audit.status_code == 200
     trace_ids = {item["trace_id"] for item in audit.json()}
     assert "risk-signal-percent-exact-trace" in trace_ids
+
+def test_admin_audit_logs_rejects_zero_workflow_version(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_version": 0,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_rejects_negative_workflow_version(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "workflow_version": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_rejects_negative_min_risk_score(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "min_risk_score": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_allows_min_risk_score_above_100(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "min_risk_score": 101,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_admin_audit_log_count_rejects_negative_min_risk_score(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "min_risk_score": -1,
+        },
+    )
+
+    assert response.status_code == 422

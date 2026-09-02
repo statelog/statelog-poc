@@ -9,6 +9,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -1463,9 +1464,9 @@ def get_audit_logs(
     allowed: bool | None = None,
     policy_name: str | None = None,
     policy_version: int | None = None,
-    workflow_version: int | None = None,
+    workflow_version: int | None = Query(default=None, ge=1),
     workflow_configured: bool | None = None,
-    min_risk_score: int | None = None,
+    min_risk_score: int | None = Query(default=None, ge=0),
     risk_signal: str | None = None,
     from_time: datetime | None = None,
     to_time: datetime | None = None,
@@ -1745,7 +1746,7 @@ def get_audit_log_count(
     allowed: bool | None = None,
     policy_name: str | None = None,
     policy_version: int | None = None,
-    min_risk_score: int | None = None,
+    min_risk_score: int | None = Query(default=None, ge=0),
     risk_signal: str | None = None,
     from_time: datetime | None = None,
     to_time: datetime | None = None,
