@@ -16277,3 +16277,308 @@ def test_admin_audit_logs_time_filter_and_pagination_preserve_order(client):
     assert response.status_code == 200
     assert len(response.json()) == 1
     assert response.json()[0]["trace_id"] == "ordering-time-trace-1"
+
+def test_admin_audit_logs_risk_signal_same_time_orders_by_id_desc(client):
+    ensure_setup(client)
+
+    same_time = datetime(2030, 5, 1, 12, 0, 0)
+
+    with SessionLocal() as db:
+        inserted = []
+
+        for i in range(3):
+            log = RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash=f"signal-order-ip-{i}",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="failure_burst,new_ip",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id=f"signal-order-trace-{i}",
+                idempotency_key=f"signal-order-idem-{i}",
+                request_fingerprint=f"signal-order-fingerprint-{i}",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=same_time,
+            )
+            db.add(log)
+            inserted.append(log)
+
+        db.commit()
+
+        expected = [
+            log.trace_id
+            for log in sorted(inserted, key=lambda item: item.id, reverse=True)
+        ]
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "new_ip",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = [
+        item["trace_id"]
+        for item in response.json()
+        if item["trace_id"].startswith("signal-order-trace-")
+    ]
+    assert trace_ids == expected
+
+
+def test_admin_audit_logs_risk_signal_same_time_offset_uses_id_tiebreak(client):
+    ensure_setup(client)
+
+    same_time = datetime(2030, 5, 2, 12, 0, 0)
+
+    with SessionLocal() as db:
+        inserted = []
+
+        for i in range(3):
+            log = RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash=f"signal-offset-ip-{i}",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=85,
+                reason="test-deny",
+                risk_signals="geo_change",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id=f"signal-offset-trace-{i}",
+                idempotency_key=f"signal-offset-idem-{i}",
+                request_fingerprint=f"signal-offset-fingerprint-{i}",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=same_time,
+            )
+            db.add(log)
+            inserted.append(log)
+
+        db.commit()
+
+        expected = sorted(
+            inserted,
+            key=lambda item: item.id,
+            reverse=True,
+        )[1].trace_id
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "geo_change",
+            "limit": 1,
+            "offset": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["trace_id"] == expected
+
+
+def test_admin_audit_logs_risk_signal_exact_filter_excludes_longer_token_during_pagination(client):
+    ensure_setup(client)
+
+    same_time = datetime(2030, 5, 3, 12, 0, 0)
+
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash="signal-exact-ip",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=90,
+                    reason="test-deny",
+                    risk_signals="new_ip",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_version=None,
+                    workflow_version=None,
+                    trace_id="signal-exact-trace",
+                    idempotency_key="signal-exact-idem",
+                    request_fingerprint="signal-exact-fingerprint",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=same_time,
+                ),
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash="signal-longer-ip",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=90,
+                    reason="test-deny",
+                    risk_signals="new_ip_extra",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_version=None,
+                    workflow_version=None,
+                    trace_id="signal-longer-trace",
+                    idempotency_key="signal-longer-idem",
+                    request_fingerprint="signal-longer-fingerprint",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=same_time,
+                ),
+            ]
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "new_ip",
+            "limit": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["trace_id"] == "signal-exact-trace"
+
+
+def test_admin_audit_logs_risk_signal_exact_middle_token_survives_pagination(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash=f"signal-middle-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=95,
+                    reason="test-deny",
+                    risk_signals="failure_burst,new_ip,geo_change",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_version=None,
+                    workflow_version=None,
+                    trace_id=f"signal-middle-trace-{i}",
+                    idempotency_key=f"signal-middle-idem-{i}",
+                    request_fingerprint=f"signal-middle-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=datetime(2030, 5, 4, 12, i, 0),
+                )
+            )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "new_ip",
+            "limit": 1,
+            "offset": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["trace_id"] == "signal-middle-trace-1"
+
+
+def test_admin_audit_logs_and_count_agree_for_exact_risk_signal_with_pagination(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash=f"signal-count-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80,
+                    reason="test-deny",
+                    risk_signals="failure_burst",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_version=None,
+                    workflow_version=None,
+                    trace_id=f"signal-count-trace-{i}",
+                    idempotency_key=f"signal-count-idem-{i}",
+                    request_fingerprint=f"signal-count-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=datetime(2030, 5, 5, 12, i, 0),
+                )
+            )
+        db.commit()
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "risk_signal": "failure_burst",
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={**params, "limit": 1},
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert len(logs.json()) == 1
+    assert count.json()["total"] == 3
