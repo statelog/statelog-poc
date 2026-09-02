@@ -14411,3 +14411,220 @@ def test_admin_audit_logs_and_count_agree_for_allowed_policy_and_workflow_filter
     assert logs.status_code == 200
     assert count.status_code == 200
     assert count.json()["total"] == len(logs.json())
+
+def test_admin_audit_logs_combines_risk_signal_and_policy_version(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="signal-policy-version-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="failure_burst,new_ip",
+                policy_matched=True,
+                policy_name="signal-version-policy",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="signal-policy-version-trace",
+                idempotency_key="signal-policy-version-idem",
+                request_fingerprint="signal-policy-version-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "failure_burst",
+            "policy_version": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "signal-policy-version-trace" in trace_ids
+    assert all(item["policy_version"] == 1 for item in response.json())
+
+
+def test_admin_audit_logs_risk_signal_excludes_wrong_policy_version(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="signal-wrong-policy-version-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="failure_burst",
+                policy_matched=True,
+                policy_name="signal-wrong-version-policy",
+                policy_version=2,
+                workflow_version=None,
+                trace_id="signal-wrong-policy-version-trace",
+                idempotency_key="signal-wrong-policy-version-idem",
+                request_fingerprint="signal-wrong-policy-version-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "failure_burst",
+            "policy_version": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "signal-wrong-policy-version-trace" not in trace_ids
+
+
+def test_admin_audit_logs_combines_risk_signal_and_workflow_version(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="signal-workflow-version-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="new_ip",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=1,
+                trace_id="signal-workflow-version-trace",
+                idempotency_key="signal-workflow-version-idem",
+                request_fingerprint="signal-workflow-version-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "new_ip",
+            "workflow_version": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "signal-workflow-version-trace" in trace_ids
+    assert all(item["workflow_version"] == 1 for item in response.json())
+
+
+def test_admin_audit_logs_combines_risk_signal_and_workflow_configured_false(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="signal-default-workflow-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="geo_change",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="signal-default-workflow-trace",
+                idempotency_key="signal-default-workflow-idem",
+                request_fingerprint="signal-default-workflow-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "geo_change",
+            "workflow_configured": False,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "signal-default-workflow-trace" in trace_ids
+    assert all(item["workflow_version"] is None for item in response.json())
+
+
+def test_admin_audit_logs_and_count_agree_for_risk_signal_policy_and_workflow_filters(client):
+    ensure_setup(client)
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "risk_signal": "signal-that-does-not-exist",
+        "policy_version": 1,
+        "workflow_configured": True,
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert logs.json() == []
+    assert count.json()["total"] == 0
