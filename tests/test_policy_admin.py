@@ -15737,3 +15737,263 @@ def test_admin_audit_logs_and_count_agree_for_time_allowed_and_min_risk_score(cl
     assert count.status_code == 200
     assert logs.json() == []
     assert count.json()["total"] == 0
+
+def test_admin_audit_logs_limit_applies_after_policy_name_filter(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash=f"pagination-policy-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=10 + i,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=True,
+                    policy_name="pagination-policy",
+                    policy_version=1,
+                    workflow_version=None,
+                    trace_id=f"pagination-policy-trace-{i}",
+                    idempotency_key=f"pagination-policy-idem-{i}",
+                    request_fingerprint=f"pagination-policy-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=datetime(2030, 3, 1, 12, i, 0),
+                )
+            )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "pagination-policy",
+            "limit": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == 2
+    assert all(item["policy_name"] == "pagination-policy" for item in items)
+
+
+def test_admin_audit_logs_offset_applies_after_policy_name_filter(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash=f"pagination-offset-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=20 + i,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=True,
+                    policy_name="pagination-offset-policy",
+                    policy_version=1,
+                    workflow_version=None,
+                    trace_id=f"pagination-offset-trace-{i}",
+                    idempotency_key=f"pagination-offset-idem-{i}",
+                    request_fingerprint=f"pagination-offset-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=datetime(2030, 3, 2, 12, i, 0),
+                )
+            )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "pagination-offset-policy",
+            "limit": 1,
+            "offset": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == 1
+    assert items[0]["trace_id"] == "pagination-offset-trace-1"
+
+
+def test_admin_audit_logs_limit_applies_after_risk_signal_filter(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash=f"pagination-signal-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=80 + i,
+                    reason="test-deny",
+                    risk_signals="geo_change",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_version=None,
+                    workflow_version=None,
+                    trace_id=f"pagination-signal-trace-{i}",
+                    idempotency_key=f"pagination-signal-idem-{i}",
+                    request_fingerprint=f"pagination-signal-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=datetime(2030, 3, 3, 12, i, 0),
+                )
+            )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "geo_change",
+            "limit": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == 2
+    assert all("geo_change" in item["risk_signals"] for item in items)
+
+
+def test_admin_audit_logs_offset_applies_after_allowed_and_min_risk_filters(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash=f"pagination-risk-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=False,
+                    risk_score=90 + i,
+                    reason="test-deny",
+                    risk_signals="failure_burst",
+                    policy_matched=False,
+                    policy_name=None,
+                    policy_version=None,
+                    workflow_version=None,
+                    trace_id=f"pagination-risk-trace-{i}",
+                    idempotency_key=f"pagination-risk-idem-{i}",
+                    request_fingerprint=f"pagination-risk-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=datetime(2030, 3, 4, 12, i, 0),
+                )
+            )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "allowed": False,
+            "min_risk_score": 90,
+            "limit": 1,
+            "offset": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == 1
+    assert items[0]["trace_id"] == "pagination-risk-trace-1"
+    assert items[0]["risk_score"] >= 90
+    assert items[0]["allowed"] is False
+
+
+def test_admin_audit_log_count_ignores_list_pagination(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        for i in range(3):
+            db.add(
+                RequestLog(
+                    tenant_id="tenant-demo",
+                    right_id="right-001",
+                    client_id="gateway-1",
+                    source_client="gateway-1",
+                    device_id="device-A1",
+                    user_id="user-123",
+                    ip_hash=f"pagination-count-ip-{i}",
+                    country_code="EE",
+                    request_type="access",
+                    allowed=True,
+                    risk_score=30,
+                    reason="allowed",
+                    risk_signals="",
+                    policy_matched=True,
+                    policy_name="pagination-count-policy",
+                    policy_version=1,
+                    workflow_version=None,
+                    trace_id=f"pagination-count-trace-{i}",
+                    idempotency_key=f"pagination-count-idem-{i}",
+                    request_fingerprint=f"pagination-count-fingerprint-{i}",
+                    user_agent="pytest",
+                    decision_version="test",
+                    created_at=datetime(2030, 3, 5, 12, i, 0),
+                )
+            )
+        db.commit()
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "policy_name": "pagination-count-policy",
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={**params, "limit": 1},
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert len(logs.json()) == 1
+    assert count.json()["total"] == 3
