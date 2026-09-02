@@ -13124,3 +13124,171 @@ def test_admin_audit_logs_normalizes_offsets_before_range_validation(client):
     )
 
     assert response.status_code == 200
+
+def test_admin_audit_logs_from_time_normalizes_negative_offset(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 17, 0, 0)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="timezone-negative-offset-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="timezone-negative-offset-trace",
+                idempotency_key="timezone-negative-offset-idem",
+                request_fingerprint="timezone-negative-offset-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=boundary,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T12:00:00-05:00",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "timezone-negative-offset-trace" in trace_ids
+
+
+def test_admin_audit_logs_to_time_normalizes_negative_offset(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 17, 0, 0)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="timezone-negative-to-offset-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="timezone-negative-to-offset-trace",
+                idempotency_key="timezone-negative-to-offset-idem",
+                request_fingerprint="timezone-negative-to-offset-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=boundary,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "to_time": "2030-01-01T12:00:00-05:00",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "timezone-negative-to-offset-trace" in trace_ids
+
+
+def test_admin_audit_logs_positive_and_negative_offsets_are_equivalent(client):
+    ensure_setup(client)
+
+    positive = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T20:00:00+03:00",
+        },
+    )
+
+    negative = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T12:00:00-05:00",
+        },
+    )
+
+    assert positive.status_code == 200
+    assert negative.status_code == 200
+
+    positive_trace_ids = {item["trace_id"] for item in positive.json()}
+    negative_trace_ids = {item["trace_id"] for item in negative.json()}
+
+    assert positive_trace_ids == negative_trace_ids
+
+
+def test_admin_audit_log_count_positive_and_negative_offsets_are_equivalent(client):
+    ensure_setup(client)
+
+    positive = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2020-01-01T03:00:00+03:00",
+        },
+    )
+
+    negative = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2019-12-31T19:00:00-05:00",
+        },
+    )
+
+    assert positive.status_code == 200
+    assert negative.status_code == 200
+    assert positive.json()["total"] == negative.json()["total"]
+
+
+def test_admin_audit_logs_rejects_range_reversed_only_after_timezone_normalization(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T12:00:00-05:00",
+            "to_time": "2030-01-01T18:00:00+03:00",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "invalid_time_range"
