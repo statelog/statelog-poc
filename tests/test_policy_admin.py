@@ -12956,3 +12956,171 @@ def test_admin_audit_logs_and_count_include_exact_time_boundary(client):
     trace_ids = {item["trace_id"] for item in logs.json()}
     assert "time-exact-range-trace" in trace_ids
     assert count.json()["total"] == len(logs.json())
+
+def test_admin_audit_logs_from_time_normalizes_positive_offset(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 9, 0, 0)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="timezone-from-offset-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="timezone-from-offset-trace",
+                idempotency_key="timezone-from-offset-idem",
+                request_fingerprint="timezone-from-offset-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=boundary,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T12:00:00+03:00",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "timezone-from-offset-trace" in trace_ids
+
+
+def test_admin_audit_logs_to_time_normalizes_positive_offset(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 9, 0, 0)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="timezone-to-offset-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="timezone-to-offset-trace",
+                idempotency_key="timezone-to-offset-idem",
+                request_fingerprint="timezone-to-offset-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=boundary,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "to_time": "2030-01-01T12:00:00+03:00",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "timezone-to-offset-trace" in trace_ids
+
+
+def test_admin_audit_logs_z_and_positive_offset_are_equivalent(client):
+    ensure_setup(client)
+
+    params_z = {
+        "tenant_id": "tenant-demo",
+        "from_time": "2030-01-01T09:00:00Z",
+    }
+    params_offset = {
+        "tenant_id": "tenant-demo",
+        "from_time": "2030-01-01T12:00:00+03:00",
+    }
+
+    response_z = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params_z,
+    )
+    response_offset = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params_offset,
+    )
+
+    assert response_z.status_code == 200
+    assert response_offset.status_code == 200
+
+    trace_ids_z = {item["trace_id"] for item in response_z.json()}
+    trace_ids_offset = {item["trace_id"] for item in response_offset.json()}
+
+    assert trace_ids_z == trace_ids_offset
+
+
+def test_admin_audit_log_count_z_and_positive_offset_are_equivalent(client):
+    ensure_setup(client)
+
+    response_z = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2020-01-01T00:00:00Z",
+        },
+    )
+    response_offset = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2020-01-01T03:00:00+03:00",
+        },
+    )
+
+    assert response_z.status_code == 200
+    assert response_offset.status_code == 200
+    assert response_z.json()["total"] == response_offset.json()["total"]
+
+
+def test_admin_audit_logs_normalizes_offsets_before_range_validation(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T12:00:00+03:00",
+            "to_time": "2030-01-01T09:00:00Z",
+        },
+    )
+
+    assert response.status_code == 200

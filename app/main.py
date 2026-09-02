@@ -54,6 +54,7 @@ from .schemas import (
     PolicySimulationRequest,
     PolicyUpdate,
     WorkflowConfigUpdate,
+    normalize_utc_naive,
 )
 from .security import build_request_fingerprint, constant_time_equals, decode_access_token, encrypt_secret, get_active_signing_key, hash_secret, hash_with_pepper, issue_access_token
 from .services.auth_service import enforce_right_owner
@@ -1478,6 +1479,9 @@ def get_audit_logs(
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
 
+    from_time = normalize_utc_naive(from_time)
+    to_time = normalize_utc_naive(to_time)
+
     if from_time is not None and to_time is not None and from_time > to_time:
         raise HTTPException(
             status_code=422,
@@ -1762,6 +1766,9 @@ def get_audit_log_count(
     db: Session = Depends(get_db),
 ):
 
+    from_time = normalize_utc_naive(from_time)
+    to_time = normalize_utc_naive(to_time)
+    
     if from_time is not None and to_time is not None and from_time > to_time:
         raise HTTPException(
             status_code=422,
