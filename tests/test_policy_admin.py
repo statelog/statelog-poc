@@ -16894,3 +16894,246 @@ def test_admin_audit_logs_large_offset_returns_empty_list(client):
 
     assert response.status_code == 200
     assert response.json() == []
+
+def test_admin_audit_logs_policy_name_filter_is_case_sensitive(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="case-policy-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=10,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="CaseSensitivePolicy",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="case-policy-trace",
+                idempotency_key="case-policy-idem",
+                request_fingerprint="case-policy-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 7, 1, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "casesensitivepolicy",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "case-policy-trace" not in trace_ids
+
+
+def test_admin_audit_logs_policy_name_exact_case_matches(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="case-policy-exact-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=10,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="ExactCasePolicy",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="case-policy-exact-trace",
+                idempotency_key="case-policy-exact-idem",
+                request_fingerprint="case-policy-exact-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 7, 2, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "ExactCasePolicy",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "case-policy-exact-trace" in trace_ids
+
+
+def test_admin_audit_logs_risk_signal_filter_is_case_sensitive(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="case-signal-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="new_ip",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="case-signal-trace",
+                idempotency_key="case-signal-idem",
+                request_fingerprint="case-signal-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 7, 3, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "NEW_IP",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "case-signal-trace" not in trace_ids
+
+
+def test_admin_audit_logs_risk_signal_exact_case_matches_middle_token(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="case-middle-signal-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=90,
+                reason="test-deny",
+                risk_signals="failure_burst,new_ip,geo_change",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="case-middle-signal-trace",
+                idempotency_key="case-middle-signal-idem",
+                request_fingerprint="case-middle-signal-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 7, 4, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "new_ip",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "case-middle-signal-trace" in trace_ids
+
+
+def test_admin_audit_logs_and_count_agree_for_case_sensitive_filters(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="case-count-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=85,
+                reason="test-deny",
+                risk_signals="new_ip",
+                policy_matched=True,
+                policy_name="CaseCountPolicy",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="case-count-trace",
+                idempotency_key="case-count-idem",
+                request_fingerprint="case-count-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 7, 5, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "policy_name": "casecountpolicy",
+        "risk_signal": "NEW_IP",
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert logs.json() == []
+    assert count.json()["total"] == 0
