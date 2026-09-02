@@ -13531,3 +13531,229 @@ def test_admin_audit_logs_and_count_accept_policy_version_one(client):
     assert logs.status_code == 200
     assert count.status_code == 200
     assert count.json()["total"] == len(logs.json())
+
+def test_admin_audit_logs_combines_policy_and_workflow_version_filters(client):
+    ensure_setup(client)
+
+    workflow = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert workflow.status_code == 200
+    assert workflow.json()["version"] == 1
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="policy-workflow-combo-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="combo-policy",
+                policy_version=1,
+                workflow_version=1,
+                trace_id="policy-workflow-combo-trace",
+                idempotency_key="policy-workflow-combo-idem",
+                request_fingerprint="policy-workflow-combo-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": 1,
+            "workflow_version": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "policy-workflow-combo-trace" in trace_ids
+    assert all(item["policy_version"] == 1 for item in response.json())
+    assert all(item["workflow_version"] == 1 for item in response.json())
+
+
+def test_admin_audit_logs_policy_and_workflow_version_mismatch_returns_empty(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="policy-workflow-mismatch-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="mismatch-policy",
+                policy_version=1,
+                workflow_version=2,
+                trace_id="policy-workflow-mismatch-trace",
+                idempotency_key="policy-workflow-mismatch-idem",
+                request_fingerprint="policy-workflow-mismatch-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": 1,
+            "workflow_version": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "policy-workflow-mismatch-trace" not in trace_ids
+
+
+def test_admin_audit_log_count_combines_policy_and_workflow_version_filters(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="policy-workflow-count-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="count-combo-policy",
+                policy_version=1,
+                workflow_version=1,
+                trace_id="policy-workflow-count-trace",
+                idempotency_key="policy-workflow-count-idem",
+                request_fingerprint="policy-workflow-count-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": 1,
+            "workflow_version": 1,
+        },
+    )
+
+    assert count.status_code == 200
+    assert count.json()["total"] >= 1
+
+
+def test_admin_audit_logs_and_count_agree_for_policy_and_workflow_versions(client):
+    ensure_setup(client)
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "policy_version": 1,
+        "workflow_version": 1,
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert count.json()["total"] == len(logs.json())
+
+
+def test_admin_audit_policy_and_workflow_version_filters_preserve_tenant_isolation(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="other-tenant",
+                right_id="right-other",
+                client_id="gateway-other",
+                source_client="gateway-other",
+                device_id="device-other",
+                user_id="user-other",
+                ip_hash="other-tenant-combo-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="other-policy",
+                policy_version=1,
+                workflow_version=1,
+                trace_id="other-tenant-combo-trace",
+                idempotency_key="other-tenant-combo-idem",
+                request_fingerprint="other-tenant-combo-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": 1,
+            "workflow_version": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "other-tenant-combo-trace" not in trace_ids
