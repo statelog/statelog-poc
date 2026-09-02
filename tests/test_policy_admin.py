@@ -17369,3 +17369,175 @@ def test_admin_audit_log_count_trims_risk_signal(client):
 
     assert response.status_code == 200
     assert response.json()["total"] == 1
+
+def test_admin_audit_logs_tenant_id_trims_leading_whitespace(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+    trace_id = access.json()["trace_id"]
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "   tenant-demo",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert trace_id in trace_ids
+
+
+def test_admin_audit_logs_tenant_id_trims_trailing_whitespace(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+    trace_id = access.json()["trace_id"]
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo   ",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert trace_id in trace_ids
+
+
+def test_admin_audit_log_count_trims_tenant_id_whitespace(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    exact = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+        },
+    )
+    padded = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "   tenant-demo   ",
+        },
+    )
+
+    assert exact.status_code == 200
+    assert padded.status_code == 200
+    assert padded.json()["total"] == exact.json()["total"]
+
+
+def test_admin_audit_logs_trim_tenant_and_policy_name_together(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="trim-tenant-policy-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=10,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="TenantTrimPolicy",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="trim-tenant-policy-trace",
+                idempotency_key="trim-tenant-policy-idem",
+                request_fingerprint="trim-tenant-policy-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 9, 1, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "  tenant-demo  ",
+            "policy_name": "  TenantTrimPolicy  ",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "trim-tenant-policy-trace" in trace_ids
+
+
+def test_admin_audit_logs_and_count_agree_with_trimmed_tenant_and_risk_signal(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="trim-tenant-signal-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=90,
+                reason="test-deny",
+                risk_signals="new_ip",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="trim-tenant-signal-trace",
+                idempotency_key="trim-tenant-signal-idem",
+                request_fingerprint="trim-tenant-signal-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 9, 2, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    params = {
+        "tenant_id": "  tenant-demo  ",
+        "risk_signal": "  new_ip  ",
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+
+    trace_ids = {item["trace_id"] for item in logs.json()}
+    assert "trim-tenant-signal-trace" in trace_ids
+    assert count.json()["total"] == len(logs.json())

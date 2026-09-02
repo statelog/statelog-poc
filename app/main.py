@@ -1389,6 +1389,8 @@ def build_audit_log_query(
     from_time: datetime | None = None,
     to_time: datetime | None = None,
 ):
+    tenant_id = tenant_id.strip()
+
     query = select(RequestLog).where(
         RequestLog.tenant_id == tenant_id
     )
