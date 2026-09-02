@@ -1419,6 +1419,7 @@ def build_audit_log_query(
         )
 
     if policy_name is not None:
+        policy_name = policy_name.strip()
         query = query.where(
             RequestLog.policy_name == policy_name
         )
@@ -1429,6 +1430,7 @@ def build_audit_log_query(
         )
 
     if risk_signal is not None:
+        risk_signal = risk_signal.strip()
         query = query.where(
             (
                 (RequestLog.risk_signals == risk_signal)

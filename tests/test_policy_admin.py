@@ -17137,3 +17137,235 @@ def test_admin_audit_logs_and_count_agree_for_case_sensitive_filters(client):
     assert count.status_code == 200
     assert logs.json() == []
     assert count.json()["total"] == 0
+
+def test_admin_audit_logs_policy_name_trims_leading_whitespace(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="trim-policy-leading-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=10,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="TrimPolicy",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="trim-policy-leading-trace",
+                idempotency_key="trim-policy-leading-idem",
+                request_fingerprint="trim-policy-leading-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 8, 1, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "   TrimPolicy",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "trim-policy-leading-trace" in trace_ids
+
+
+def test_admin_audit_logs_policy_name_trims_trailing_whitespace(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="trim-policy-trailing-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=10,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="TrimPolicyTrailing",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="trim-policy-trailing-trace",
+                idempotency_key="trim-policy-trailing-idem",
+                request_fingerprint="trim-policy-trailing-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 8, 2, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "TrimPolicyTrailing   ",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "trim-policy-trailing-trace" in trace_ids
+
+
+def test_admin_audit_logs_risk_signal_trims_surrounding_whitespace(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="trim-signal-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="failure_burst,new_ip,geo_change",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="trim-signal-trace",
+                idempotency_key="trim-signal-idem",
+                request_fingerprint="trim-signal-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 8, 3, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "   new_ip   ",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "trim-signal-trace" in trace_ids
+
+
+def test_admin_audit_log_count_trims_policy_name(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="trim-count-policy-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=10,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="TrimCountPolicy",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="trim-count-policy-trace",
+                idempotency_key="trim-count-policy-idem",
+                request_fingerprint="trim-count-policy-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 8, 4, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "  TrimCountPolicy  ",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+
+
+def test_admin_audit_log_count_trims_risk_signal(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="trim-count-signal-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=90,
+                reason="test-deny",
+                risk_signals="failure_burst,new_ip",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="trim-count-signal-trace",
+                idempotency_key="trim-count-signal-idem",
+                request_fingerprint="trim-count-signal-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 8, 5, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "  new_ip  ",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
