@@ -13292,3 +13292,159 @@ def test_admin_audit_logs_rejects_range_reversed_only_after_timezone_normalizati
 
     assert response.status_code == 422
     assert response.json()["detail"] == "invalid_time_range"
+
+def test_admin_audit_log_count_from_time_normalizes_negative_offset(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 17, 0, 0)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="count-negative-offset-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="count-negative-offset-trace",
+                idempotency_key="count-negative-offset-idem",
+                request_fingerprint="count-negative-offset-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=boundary,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T12:00:00-05:00",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+
+
+def test_admin_audit_log_count_to_time_normalizes_negative_offset(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 17, 0, 0)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="count-negative-to-offset-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="count-negative-to-offset-trace",
+                idempotency_key="count-negative-to-offset-idem",
+                request_fingerprint="count-negative-to-offset-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=boundary,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": boundary.isoformat(),
+            "to_time": "2030-01-01T12:00:00-05:00",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+
+
+def test_admin_audit_log_count_allows_equal_instant_with_different_offsets(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T12:00:00-05:00",
+            "to_time": "2030-01-01T20:00:00+03:00",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_admin_audit_log_count_rejects_range_reversed_after_timezone_normalization(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T12:00:00-05:00",
+            "to_time": "2030-01-01T18:00:00+03:00",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "invalid_time_range"
+
+
+def test_admin_audit_logs_and_count_agree_with_mixed_timezone_range(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "from_time": "2019-12-31T19:00:00-05:00",
+        "to_time": "2999-01-01T03:00:00+03:00",
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert count.json()["total"] == len(logs.json())
