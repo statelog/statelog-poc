@@ -15512,3 +15512,228 @@ def test_admin_audit_logs_and_count_agree_for_time_policy_workflow_filters(clien
     assert count.status_code == 200
     assert logs.json() == []
     assert count.json()["total"] == 0
+
+def test_admin_audit_logs_combines_time_range_and_allowed(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="time-allowed-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="failure_burst",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="time-allowed-trace",
+                idempotency_key="time-allowed-idem",
+                request_fingerprint="time-allowed-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 2, 1, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "allowed": False,
+            "from_time": "2030-02-01T11:00:00",
+            "to_time": "2030-02-01T13:00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "time-allowed-trace" in trace_ids
+    assert all(item["allowed"] is False for item in response.json())
+
+
+def test_admin_audit_logs_time_range_and_allowed_excludes_wrong_decision(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="time-allowed-mismatch-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="failure_burst",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="time-allowed-mismatch-trace",
+                idempotency_key="time-allowed-mismatch-idem",
+                request_fingerprint="time-allowed-mismatch-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 2, 2, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "allowed": True,
+            "from_time": "2030-02-02T11:00:00",
+            "to_time": "2030-02-02T13:00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "time-allowed-mismatch-trace" not in trace_ids
+
+
+def test_admin_audit_logs_combines_time_range_and_min_risk_score(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="time-min-risk-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=75,
+                reason="test-deny",
+                risk_signals="new_ip",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="time-min-risk-trace",
+                idempotency_key="time-min-risk-idem",
+                request_fingerprint="time-min-risk-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 2, 3, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "min_risk_score": 75,
+            "from_time": "2030-02-03T11:00:00",
+            "to_time": "2030-02-03T13:00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "time-min-risk-trace" in trace_ids
+    assert all(item["risk_score"] >= 75 for item in response.json())
+
+
+def test_admin_audit_logs_time_range_min_risk_score_excludes_lower_score(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="time-min-risk-low-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=74,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="time-min-risk-low-trace",
+                idempotency_key="time-min-risk-low-idem",
+                request_fingerprint="time-min-risk-low-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 2, 4, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "min_risk_score": 75,
+            "from_time": "2030-02-04T11:00:00",
+            "to_time": "2030-02-04T13:00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "time-min-risk-low-trace" not in trace_ids
+
+
+def test_admin_audit_logs_and_count_agree_for_time_allowed_and_min_risk_score(client):
+    ensure_setup(client)
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "allowed": False,
+        "min_risk_score": 101,
+        "from_time": "2030-02-01T00:00:00",
+        "to_time": "2030-02-05T00:00:00",
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert logs.json() == []
+    assert count.json()["total"] == 0
