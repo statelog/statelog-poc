@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from tests.test_smoke import ADMIN_HEADERS, ensure_setup, issue_token, access_request
 from app.database import SessionLocal
 from app.models import PolicyHistory
@@ -12703,4 +12703,256 @@ def test_admin_audit_logs_and_count_agree_on_time_range(client):
 
     assert logs.status_code == 200
     assert count.status_code == 200
+    assert count.json()["total"] == len(logs.json())
+
+def test_admin_audit_logs_from_time_boundary_is_inclusive(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 12, 0, 0)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="time-from-boundary-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="time-from-boundary-trace",
+                idempotency_key="time-from-boundary-idem",
+                request_fingerprint="time-from-boundary-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=boundary,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": boundary.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "time-from-boundary-trace" in trace_ids
+
+
+def test_admin_audit_logs_to_time_boundary_is_inclusive(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 12, 0, 0)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="time-to-boundary-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="time-to-boundary-trace",
+                idempotency_key="time-to-boundary-idem",
+                request_fingerprint="time-to-boundary-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=boundary,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "to_time": boundary.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "time-to-boundary-trace" in trace_ids
+
+
+def test_admin_audit_logs_from_time_excludes_earlier_microsecond(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 12, 0, 0)
+    before = boundary - timedelta(microseconds=1)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="time-before-boundary-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="time-before-boundary-trace",
+                idempotency_key="time-before-boundary-idem",
+                request_fingerprint="time-before-boundary-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=before,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": boundary.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "time-before-boundary-trace" not in trace_ids
+
+
+def test_admin_audit_logs_to_time_excludes_later_microsecond(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 12, 0, 0)
+    after = boundary + timedelta(microseconds=1)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="time-after-boundary-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="time-after-boundary-trace",
+                idempotency_key="time-after-boundary-idem",
+                request_fingerprint="time-after-boundary-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=after,
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "to_time": boundary.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "time-after-boundary-trace" not in trace_ids
+
+
+def test_admin_audit_logs_and_count_include_exact_time_boundary(client):
+    ensure_setup(client)
+
+    boundary = datetime(2030, 1, 1, 12, 0, 0)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="time-exact-range-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=0,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                trace_id="time-exact-range-trace",
+                idempotency_key="time-exact-range-idem",
+                request_fingerprint="time-exact-range-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=boundary,
+            )
+        )
+        db.commit()
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "from_time": boundary.isoformat(),
+        "to_time": boundary.isoformat(),
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+
+    trace_ids = {item["trace_id"] for item in logs.json()}
+    assert "time-exact-range-trace" in trace_ids
     assert count.json()["total"] == len(logs.json())
