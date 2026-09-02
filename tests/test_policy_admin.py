@@ -16582,3 +16582,86 @@ def test_admin_audit_logs_and_count_agree_for_exact_risk_signal_with_pagination(
     assert count.status_code == 200
     assert len(logs.json()) == 1
     assert count.json()["total"] == 3
+
+def test_admin_audit_logs_rejects_blank_policy_name(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_rejects_whitespace_policy_name(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "   ",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_rejects_blank_risk_signal(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_rejects_whitespace_risk_signal(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "   ",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_blank_business_filters(client):
+    ensure_setup(client)
+
+    policy_response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "   ",
+        },
+    )
+    signal_response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "risk_signal": "   ",
+        },
+    )
+
+    assert policy_response.status_code == 422
+    assert signal_response.status_code == 422
