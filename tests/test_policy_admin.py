@@ -15066,3 +15066,222 @@ def test_admin_audit_logs_and_count_agree_for_policy_allowed_and_risk_signal(cli
     assert count.status_code == 200
     assert logs.json() == []
     assert count.json()["total"] == 0
+
+def test_admin_audit_logs_combines_policy_name_and_min_risk_score(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="policy-risk-score-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=80,
+                reason="test-deny",
+                risk_signals="failure_burst",
+                policy_matched=True,
+                policy_name="policy-risk-score-combo",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="policy-risk-score-combo-trace",
+                idempotency_key="policy-risk-score-combo-idem",
+                request_fingerprint="policy-risk-score-combo-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "policy-risk-score-combo",
+            "min_risk_score": 80,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "policy-risk-score-combo-trace" in trace_ids
+    assert all(item["policy_name"] == "policy-risk-score-combo" for item in response.json())
+    assert all(item["risk_score"] >= 80 for item in response.json())
+
+
+def test_admin_audit_logs_policy_name_min_risk_score_boundary_is_inclusive(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="policy-risk-boundary-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=75,
+                reason="test-deny",
+                risk_signals="new_ip",
+                policy_matched=True,
+                policy_name="policy-risk-boundary",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="policy-risk-boundary-trace",
+                idempotency_key="policy-risk-boundary-idem",
+                request_fingerprint="policy-risk-boundary-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "policy-risk-boundary",
+            "min_risk_score": 75,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "policy-risk-boundary-trace" in trace_ids
+
+
+def test_admin_audit_logs_policy_name_min_risk_score_excludes_lower_score(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="policy-risk-low-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=74,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=True,
+                policy_name="policy-risk-low",
+                policy_version=1,
+                workflow_version=None,
+                trace_id="policy-risk-low-trace",
+                idempotency_key="policy-risk-low-idem",
+                request_fingerprint="policy-risk-low-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "policy-risk-low",
+            "min_risk_score": 75,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "policy-risk-low-trace" not in trace_ids
+
+
+def test_admin_audit_logs_combines_policy_name_min_risk_score_and_workflow_configured(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+                client_id="gateway-1",
+                source_client="gateway-1",
+                device_id="device-A1",
+                user_id="user-123",
+                ip_hash="policy-risk-workflow-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=False,
+                risk_score=90,
+                reason="test-deny",
+                risk_signals="geo_change",
+                policy_matched=True,
+                policy_name="policy-risk-workflow",
+                policy_version=1,
+                workflow_version=1,
+                trace_id="policy-risk-workflow-trace",
+                idempotency_key="policy-risk-workflow-idem",
+                request_fingerprint="policy-risk-workflow-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_name": "policy-risk-workflow",
+            "min_risk_score": 90,
+            "workflow_configured": True,
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "policy-risk-workflow-trace" in trace_ids
+    assert all(item["policy_name"] == "policy-risk-workflow" for item in response.json())
+    assert all(item["risk_score"] >= 90 for item in response.json())
+    assert all(item["workflow_version"] is not None for item in response.json())
+
+
+def test_admin_audit_logs_and_count_agree_for_policy_name_and_min_risk_score(client):
+    ensure_setup(client)
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "policy_name": "policy-that-does-not-exist",
+        "min_risk_score": 50,
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert logs.json() == []
+    assert count.json()["total"] == 0
