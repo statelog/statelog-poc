@@ -13448,3 +13448,86 @@ def test_admin_audit_logs_and_count_agree_with_mixed_timezone_range(client):
     assert logs.status_code == 200
     assert count.status_code == 200
     assert count.json()["total"] == len(logs.json())
+
+def test_admin_audit_logs_rejects_zero_policy_version(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": 0,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_rejects_negative_policy_version(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_zero_policy_version(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": 0,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_negative_policy_version(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "policy_version": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_and_count_accept_policy_version_one(client):
+    ensure_setup(client)
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "policy_version": 1,
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert count.json()["total"] == len(logs.json())
