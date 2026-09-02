@@ -12611,3 +12611,96 @@ def test_admin_audit_log_count_rejects_zero_workflow_version(client):
     )
 
     assert count.status_code == 422
+
+def test_admin_audit_logs_rejects_reversed_time_range(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-02T00:00:00",
+            "to_time": "2030-01-01T00:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_log_count_rejects_reversed_time_range(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-02T00:00:00",
+            "to_time": "2030-01-01T00:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_audit_logs_allows_equal_time_range(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T00:00:00",
+            "to_time": "2030-01-01T00:00:00",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_admin_audit_log_count_allows_equal_time_range(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "tenant-demo",
+            "from_time": "2030-01-01T00:00:00",
+            "to_time": "2030-01-01T00:00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
+def test_admin_audit_logs_and_count_agree_on_time_range(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    params = {
+        "tenant_id": "tenant-demo",
+        "from_time": "2020-01-01T00:00:00",
+        "to_time": "2999-01-01T00:00:00",
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+    assert count.json()["total"] == len(logs.json())

@@ -1478,6 +1478,12 @@ def get_audit_logs(
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
 
+    if from_time is not None and to_time is not None and from_time > to_time:
+        raise HTTPException(
+            status_code=422,
+            detail="invalid_time_range",
+        )
+
     query = build_audit_log_query(
         tenant_id=tenant_id,
         allowed=allowed,
@@ -1755,6 +1761,12 @@ def get_audit_log_count(
     _: str = Depends(get_admin),
     db: Session = Depends(get_db),
 ):
+
+    if from_time is not None and to_time is not None and from_time > to_time:
+        raise HTTPException(
+            status_code=422,
+            detail="invalid_time_range",
+    )
     query = build_audit_log_query(
         tenant_id=tenant_id,
         allowed=allowed,
