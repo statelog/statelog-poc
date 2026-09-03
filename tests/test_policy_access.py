@@ -4885,3 +4885,129 @@ def test_live_failure_burst_new_ip_and_transfer_velocity_score_seventy_five_deni
     assert "new_ip" in body["risk_signals"]
     assert "transfer_velocity" in body["risk_signals"]
     assert "sensitive_action" not in body["risk_signals"]
+
+def test_idempotent_retry_preserves_full_response_shape(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.5.1",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "idempotent-full-response-shape",
+    }
+
+    first = client.post("/request/access", headers=headers, json=payload)
+    second = client.post("/request/access", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert set(second.json()) == set(first.json())
+
+
+def test_idempotent_retry_preserves_trust_score(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.5.2",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "idempotent-trust-score",
+    }
+
+    first = client.post("/request/access", headers=headers, json=payload)
+    second = client.post("/request/access", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["trust_score"] == first.json()["trust_score"]
+
+
+def test_idempotent_retry_preserves_risk_signals(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.5.3",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "idempotent-risk-signals",
+    }
+
+    first = client.post("/request/access", headers=headers, json=payload)
+    second = client.post("/request/access", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["risk_signals"] == first.json()["risk_signals"]
+
+
+def test_idempotent_retry_preserves_policy_metadata(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.5.4",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "idempotent-policy-metadata",
+    }
+
+    first = client.post("/request/access", headers=headers, json=payload)
+    second = client.post("/request/access", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["policy_matched"] == first.json()["policy_matched"]
+    assert second.json()["policy_name"] == first.json()["policy_name"]
+
+
+def test_idempotent_retry_preserves_explanation_and_workflow_version(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.5.5",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "idempotent-explanation-workflow",
+    }
+
+    first = client.post("/request/access", headers=headers, json=payload)
+    second = client.post("/request/access", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["workflow_version"] == first.json()["workflow_version"]
+    assert second.json()["explanation"] == first.json()["explanation"]
