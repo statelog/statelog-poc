@@ -17541,3 +17541,168 @@ def test_admin_audit_logs_and_count_agree_with_trimmed_tenant_and_risk_signal(cl
     trace_ids = {item["trace_id"] for item in logs.json()}
     assert "trim-tenant-signal-trace" in trace_ids
     assert count.json()["total"] == len(logs.json())
+
+def test_admin_audit_logs_tenant_id_is_case_sensitive(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+    trace_id = access.json()["trace_id"]
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "TENANT-DEMO",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert trace_id not in trace_ids
+
+
+def test_admin_audit_log_count_tenant_id_is_case_sensitive(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    response = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "TENANT-DEMO",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
+def test_admin_audit_logs_trimmed_tenant_does_not_match_other_tenant(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-other",
+                right_id="right-other",
+                client_id="gateway-other",
+                source_client="gateway-other",
+                device_id="device-other",
+                user_id="user-other",
+                ip_hash="trim-isolation-other-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=10,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="trim-isolation-other-trace",
+                idempotency_key="trim-isolation-other-idem",
+                request_fingerprint="trim-isolation-other-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 10, 1, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    response = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params={
+            "tenant_id": "  tenant-demo  ",
+        },
+    )
+
+    assert response.status_code == 200
+    trace_ids = {item["trace_id"] for item in response.json()}
+    assert "trim-isolation-other-trace" not in trace_ids
+
+
+def test_admin_audit_log_count_trimmed_tenant_preserves_isolation(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        db.add(
+            RequestLog(
+                tenant_id="tenant-other",
+                right_id="right-other",
+                client_id="gateway-other",
+                source_client="gateway-other",
+                device_id="device-other",
+                user_id="user-other",
+                ip_hash="trim-count-isolation-other-ip",
+                country_code="EE",
+                request_type="access",
+                allowed=True,
+                risk_score=10,
+                reason="allowed",
+                risk_signals="",
+                policy_matched=False,
+                policy_name=None,
+                policy_version=None,
+                workflow_version=None,
+                trace_id="trim-count-isolation-other-trace",
+                idempotency_key="trim-count-isolation-other-idem",
+                request_fingerprint="trim-count-isolation-other-fingerprint",
+                user_agent="pytest",
+                decision_version="test",
+                created_at=datetime(2030, 10, 2, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+    exact = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    padded = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "  tenant-demo  "},
+    )
+
+    assert exact.status_code == 200
+    assert padded.status_code == 200
+    assert padded.json()["total"] == exact.json()["total"]
+
+
+def test_admin_audit_logs_trimmed_tenant_and_count_preserve_same_scope(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+    trace_id = access.json()["trace_id"]
+
+    params = {
+        "tenant_id": "   tenant-demo   ",
+    }
+
+    logs = client.get(
+        "/admin/audit/logs",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+    count = client.get(
+        "/admin/audit/logs/count",
+        headers=ADMIN_HEADERS,
+        params=params,
+    )
+
+    assert logs.status_code == 200
+    assert count.status_code == 200
+
+    trace_ids = {item["trace_id"] for item in logs.json()}
+    assert trace_id in trace_ids
+    assert count.json()["total"] == len(logs.json())
