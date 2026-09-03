@@ -613,3 +613,167 @@ def test_risk_engine_is_deterministic_when_logs_share_same_timestamp():
     )
 
     assert forward == reversed_order
+
+def test_failure_burst_includes_failures_exactly_fifteen_minutes_old():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="current-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=False,
+            risk_score=0,
+            reason="denied",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=f"failure-boundary-trace-{i}",
+            idempotency_key=f"failure-boundary-idem-{i}",
+            request_fingerprint=f"failure-boundary-fingerprint-{i}",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(minutes=15),
+        )
+        for i in range(3)
+    ]
+
+    decision = RiskEngine().evaluate(
+        request_type="access",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert "failure_burst" in decision.signals
+    assert decision.risk_score == 35
+
+
+def test_failure_burst_excludes_failures_older_than_fifteen_minutes():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="current-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=False,
+            risk_score=0,
+            reason="denied",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=f"old-failure-trace-{i}",
+            idempotency_key=f"old-failure-idem-{i}",
+            request_fingerprint=f"old-failure-fingerprint-{i}",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(minutes=15, seconds=1),
+        )
+        for i in range(3)
+    ]
+
+    decision = RiskEngine().evaluate(
+        request_type="access",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert "failure_burst" not in decision.signals
+    assert decision.risk_score == 0
+    assert decision.allow is True
+
+
+def test_failure_burst_requires_three_recent_failures():
+    now = utcnow_naive()
+
+    logs = [
+        RequestLog(
+            tenant_id="tenant-demo",
+            right_id="right-001",
+            client_id="gateway-1",
+            source_client="gateway-1",
+            device_id="gate-A1",
+            user_id="user-123",
+            ip_hash="current-ip",
+            country_code="EE",
+            request_type="access",
+            allowed=False,
+            risk_score=0,
+            reason="denied",
+            policy_matched=False,
+            policy_name=None,
+            trace_id=f"two-failure-trace-{i}",
+            idempotency_key=f"two-failure-idem-{i}",
+            request_fingerprint=f"two-failure-fingerprint-{i}",
+            user_agent="pytest",
+            decision_version="test",
+            created_at=now - timedelta(minutes=5),
+        )
+        for i in range(2)
+    ]
+
+    decision = RiskEngine().evaluate(
+        request_type="access",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=logs,
+        now=now,
+    )
+
+    assert "failure_burst" not in decision.signals
+    assert decision.risk_score == 0
+    assert decision.allow is True
+
+
+def test_empty_history_produces_no_novelty_signals():
+    decision = RiskEngine().evaluate(
+        request_type="access",
+        device_id="new-device",
+        ip_address="new-ip",
+        country_code="FI",
+        historical_logs=[],
+        now=utcnow_naive(),
+    )
+
+    assert decision.allow is True
+    assert decision.risk_score == 0
+    assert decision.trust_score == 100
+    assert decision.reason == "allowed"
+    assert decision.signals == ()
+
+
+def test_ownership_transfer_without_velocity_uses_sensitive_action():
+    now = utcnow_naive()
+
+    decision = RiskEngine().evaluate(
+        request_type="ownership_transfer",
+        device_id="gate-A1",
+        ip_address="current-ip",
+        country_code="EE",
+        historical_logs=[],
+        now=now,
+    )
+
+    assert "transfer_velocity" not in decision.signals
+    assert decision.signals == ("sensitive_action",)
+    assert decision.risk_score == 10
+    assert decision.trust_score == 90
+    assert decision.allow is True
+    assert decision.reason == "sensitive_action"
