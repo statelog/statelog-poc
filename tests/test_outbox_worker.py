@@ -450,3 +450,747 @@ def test_outbox_disabled_subscription_is_ignored():
         assert count == 1
         assert event.delivered is True
         assert attempts == 0
+
+def _make_outbox_event(
+    db,
+    *,
+    tenant_id: str,
+    event_type: str = "decision.allowed",
+    payload: dict | None = None,
+    attempts: int = 0,
+    last_error: str | None = None,
+    created_at=None,
+):
+    event = OutboxEvent(
+        tenant_id=tenant_id,
+        event_type=event_type,
+        payload=json.dumps(payload or {"trace_id": tenant_id}),
+        delivered=False,
+        attempts=attempts,
+        last_error=last_error,
+        next_attempt_at=utcnow_naive(),
+        **({"created_at": created_at} if created_at is not None else {}),
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+def _make_outbox_subscription(
+    db,
+    *,
+    tenant_id: str,
+    target_url: str,
+    event_type: str = "decision.allowed",
+    enabled: bool = True,
+):
+    sub = WebhookSubscription(
+        tenant_id=tenant_id,
+        target_url=target_url,
+        event_type=event_type,
+        signing_secret_hash="unused",
+        signing_secret_encrypted="unused",
+        enabled=enabled,
+    )
+    db.add(sub)
+    db.commit()
+    db.refresh(sub)
+    return sub
+
+
+def _patch_outbox_secret(monkeypatch):
+    monkeypatch.setattr(
+        "app.outbox_worker.decrypt_secret",
+        lambda value: "test-secret",
+    )
+
+
+class _OutboxResponse:
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+
+# #735
+def test_outbox_http_200_marks_event_delivered(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(200),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-735",
+            target_url="https://example.com/735",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-735",
+        )
+
+        count = deliver_pending_events(db)
+        db.refresh(event)
+
+        assert count == 1
+        assert event.delivered is True
+        assert event.delivered_at is not None
+        assert event.last_error is None
+
+
+# #736
+def test_outbox_http_299_is_success(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(299),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-736",
+            target_url="https://example.com/736",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-736",
+        )
+
+        count = deliver_pending_events(db)
+        db.refresh(event)
+
+        assert count == 1
+        assert event.delivered is True
+
+
+# #737
+def test_outbox_http_300_is_failure(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(300),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-737",
+            target_url="https://example.com/737",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-737",
+        )
+
+        count = deliver_pending_events(db)
+        db.refresh(event)
+
+        assert count == 0
+        assert event.delivered is False
+        assert event.last_error == "webhook_http_300"
+
+
+# #738
+def test_outbox_request_exception_records_failed_attempt(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+
+    def failing_post(*args, **kwargs):
+        raise RuntimeError("network_down")
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        failing_post,
+    )
+
+    with SessionLocal() as db:
+        sub = _make_outbox_subscription(
+            db,
+            tenant_id="outbox-738",
+            target_url="https://example.com/738",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-738",
+        )
+
+        count = deliver_pending_events(db)
+
+        attempt = (
+            db.query(WebhookDeliveryAttempt)
+            .filter_by(
+                event_id=event.id,
+                subscription_id=sub.id,
+            )
+            .one()
+        )
+
+        assert count == 0
+        assert attempt.successful is False
+        assert attempt.response_status_code is None
+        assert attempt.error_message == "network_down"
+
+
+# #739
+def test_outbox_http_failure_records_status_code(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(503),
+    )
+
+    with SessionLocal() as db:
+        sub = _make_outbox_subscription(
+            db,
+            tenant_id="outbox-739",
+            target_url="https://example.com/739",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-739",
+        )
+
+        deliver_pending_events(db)
+
+        attempt = (
+            db.query(WebhookDeliveryAttempt)
+            .filter_by(
+                event_id=event.id,
+                subscription_id=sub.id,
+            )
+            .one()
+        )
+
+        assert attempt.successful is False
+        assert attempt.response_status_code == 503
+        assert attempt.error_message == "webhook_http_503"
+
+
+# #740
+def test_outbox_delivery_increments_attempt_count(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(500),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-740",
+            target_url="https://example.com/740",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-740",
+            attempts=3,
+        )
+
+        deliver_pending_events(db)
+        db.refresh(event)
+
+        assert event.attempts == 4
+
+
+# #741
+def test_outbox_failure_schedules_future_retry(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(500),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-741",
+            target_url="https://example.com/741",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-741",
+        )
+
+        before = utcnow_naive()
+        deliver_pending_events(db)
+        after = utcnow_naive()
+        db.refresh(event)
+
+        assert event.next_attempt_at > before
+        assert event.next_attempt_at <= after + timedelta(seconds=3)
+
+
+# #742
+def test_outbox_failure_at_max_attempts_dead_letters(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(500),
+    )
+
+    old_max_attempts = settings.webhook_max_attempts
+    settings.webhook_max_attempts = 2
+    try:
+        with SessionLocal() as db:
+            _make_outbox_subscription(
+                db,
+                tenant_id="outbox-742",
+                target_url="https://example.com/742",
+            )
+            event = _make_outbox_event(
+                db,
+                tenant_id="outbox-742",
+                attempts=1,
+            )
+
+            count = deliver_pending_events(db)
+            db.refresh(event)
+
+            assert count == 0
+            assert event.attempts == 2
+            assert event.dead_lettered is True
+    finally:
+        settings.webhook_max_attempts = old_max_attempts
+
+
+# #743
+def test_outbox_multiple_subscriptions_all_succeed(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(200),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-743",
+            target_url="https://example.com/743-a",
+        )
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-743",
+            target_url="https://example.com/743-b",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-743",
+        )
+
+        count = deliver_pending_events(db)
+        db.refresh(event)
+
+        attempts = (
+            db.query(WebhookDeliveryAttempt)
+            .filter(
+                WebhookDeliveryAttempt.event_id == event.id
+            )
+            .all()
+        )
+
+        assert count == 1
+        assert event.delivered is True
+        assert len(attempts) == 2
+        assert all(attempt.successful for attempt in attempts)
+
+
+# #744
+def test_outbox_one_failed_subscription_keeps_event_pending(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+
+    def fake_post(url, **kwargs):
+        if url.endswith("/fail"):
+            return _OutboxResponse(500)
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-744",
+            target_url="https://example.com/success",
+        )
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-744",
+            target_url="https://example.com/fail",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-744",
+        )
+
+        count = deliver_pending_events(db)
+        db.refresh(event)
+
+        attempts = (
+            db.query(WebhookDeliveryAttempt)
+            .filter(
+                WebhookDeliveryAttempt.event_id == event.id
+            )
+            .all()
+        )
+
+        assert count == 0
+        assert event.delivered is False
+        assert len(attempts) == 2
+        assert sorted(
+            attempt.successful for attempt in attempts
+        ) == [False, True]
+
+
+# #745
+def test_outbox_successful_subscription_is_not_redelivered(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        first_sub = _make_outbox_subscription(
+            db,
+            tenant_id="outbox-745",
+            target_url="https://example.com/745-a",
+        )
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-745",
+            target_url="https://example.com/745-b",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-745",
+        )
+
+        _record_attempt(
+            db,
+            event_id=event.id,
+            subscription_id=first_sub.id,
+            attempt_number=1,
+            successful=True,
+            response_status_code=200,
+            error_message=None,
+        )
+        db.commit()
+
+        count = deliver_pending_events(db)
+        db.refresh(event)
+
+        assert count == 1
+        assert event.delivered is True
+        assert calls == ["https://example.com/745-b"]
+
+
+# #746
+def test_outbox_subscription_from_other_tenant_is_ignored(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: calls.append(args),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-746-other",
+            target_url="https://example.com/746",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-746",
+        )
+
+        count = deliver_pending_events(db)
+        db.refresh(event)
+
+        assert count == 1
+        assert event.delivered is True
+        assert calls == []
+
+
+# #747
+def test_outbox_subscription_for_other_event_type_is_ignored(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: calls.append(args),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-747",
+            target_url="https://example.com/747",
+            event_type="decision.denied",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-747",
+            event_type="decision.allowed",
+        )
+
+        count = deliver_pending_events(db)
+        db.refresh(event)
+
+        assert count == 1
+        assert event.delivered is True
+        assert calls == []
+
+
+# #748
+def test_outbox_enabled_subscription_used_when_disabled_also_exists(
+    monkeypatch,
+):
+    _patch_outbox_secret(monkeypatch)
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-748",
+            target_url="https://example.com/748-disabled",
+            enabled=False,
+        )
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-748",
+            target_url="https://example.com/748-enabled",
+            enabled=True,
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-748",
+        )
+
+        count = deliver_pending_events(db)
+
+        assert count == 1
+        assert calls == ["https://example.com/748-enabled"]
+
+
+# #749
+def test_outbox_payload_is_sent_unchanged(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    captured = {}
+
+    def fake_post(url, json=None, **kwargs):
+        captured["json"] = json
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-749",
+            target_url="https://example.com/749",
+        )
+        _make_outbox_event(
+            db,
+            tenant_id="outbox-749",
+            payload={
+                "trace_id": "749",
+                "allowed": True,
+                "risk_score": 35,
+            },
+        )
+
+        deliver_pending_events(db)
+
+        assert captured["json"] == {
+            "trace_id": "749",
+            "allowed": True,
+            "risk_score": 35,
+        }
+
+
+# #750
+def test_outbox_request_uses_configured_timeout(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured["timeout"] = kwargs["timeout"]
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-750",
+            target_url="https://example.com/750",
+        )
+        _make_outbox_event(
+            db,
+            tenant_id="outbox-750",
+        )
+
+        deliver_pending_events(db)
+
+        assert captured["timeout"] == settings.webhook_timeout_seconds
+
+
+# #751
+def test_outbox_request_contains_all_delivery_headers(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured["headers"] = kwargs["headers"]
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-751",
+            target_url="https://example.com/751",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-751",
+        )
+
+        deliver_pending_events(db)
+
+        headers = captured["headers"]
+
+        assert settings.webhook_signature_header in headers
+        assert settings.webhook_timestamp_header in headers
+        assert settings.webhook_event_id_header in headers
+        assert settings.webhook_delivery_id_header in headers
+        assert headers[settings.webhook_event_id_header] == str(event.id)
+
+
+# #752
+def test_outbox_multiple_subscriptions_share_attempt_number(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(200),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-752",
+            target_url="https://example.com/752-a",
+        )
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-752",
+            target_url="https://example.com/752-b",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-752",
+            attempts=4,
+        )
+
+        deliver_pending_events(db)
+
+        attempts = (
+            db.query(WebhookDeliveryAttempt)
+            .filter(
+                WebhookDeliveryAttempt.event_id == event.id
+            )
+            .all()
+        )
+
+        assert event.attempts == 5
+        assert len(attempts) == 2
+        assert {
+            attempt.attempt_number
+            for attempt in attempts
+        } == {5}
+
+
+# #753
+def test_outbox_success_clears_previous_error(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(200),
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-753",
+            target_url="https://example.com/753",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-753",
+            attempts=1,
+            last_error="old_failure",
+        )
+
+        count = deliver_pending_events(db)
+        db.refresh(event)
+
+        assert count == 1
+        assert event.delivered is True
+        assert event.last_error is None
+
+
+# #754
+def test_outbox_batch_processes_oldest_event_first():
+    now = utcnow_naive()
+
+    with SessionLocal() as db:
+        older = _make_outbox_event(
+            db,
+            tenant_id="outbox-754-old",
+            event_type="no.subscription",
+            created_at=now - timedelta(minutes=10),
+        )
+        newer = _make_outbox_event(
+            db,
+            tenant_id="outbox-754-new",
+            event_type="no.subscription",
+            created_at=now - timedelta(minutes=5),
+        )
+
+        count = deliver_pending_events(db, batch_size=1)
+
+        db.refresh(older)
+        db.refresh(newer)
+
+        assert count == 1
+        assert older.delivered is True
+        assert newer.delivered is False
