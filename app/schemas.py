@@ -58,10 +58,19 @@ class AccessRequest(BaseModel):
 
 
 class WebhookCreate(BaseModel):
-    tenant_id: str
+    tenant_id: str = Field(
+        min_length=1,
+        pattern=r".*\S.*",
+    )
     target_url: HttpUrl
-    event_type: str
-    signing_secret: str
+    event_type: str = Field(
+        min_length=1,
+        pattern=r".*\S.*",
+    )
+    signing_secret: str = Field(
+        min_length=1,
+        pattern=r".*\S.*",
+    )
 
 
 class DecisionResponse(BaseModel):
