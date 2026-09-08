@@ -624,3 +624,136 @@ def test_alembic_workflow_history_columns_match_orm(tmp_path, monkeypatch):
     }
 
     assert migrated_columns == orm_columns
+
+# #847
+def test_alembic_policy_unique_constraint_matches_orm(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    constraints = inspect(engine).get_unique_constraints("policies")
+
+    assert any(
+        constraint["name"] == "uq_policy_name_per_tenant"
+        and set(constraint["column_names"]) == {"tenant_id", "name"}
+        for constraint in constraints
+    )
+
+
+# #848
+def test_alembic_policy_indexes_exist(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    indexes = inspect(engine).get_indexes("policies")
+
+    indexed_columns = {
+        tuple(index["column_names"])
+        for index in indexes
+    }
+
+    assert ("tenant_id",) in indexed_columns
+    assert ("name",) in indexed_columns
+
+
+# #849
+def test_alembic_policy_history_indexes_exist(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    indexes = inspect(engine).get_indexes("policy_history")
+
+    indexed_columns = {
+        tuple(index["column_names"])
+        for index in indexes
+    }
+
+    assert ("policy_id",) in indexed_columns
+    assert ("tenant_id",) in indexed_columns
+
+
+# #850
+def test_alembic_workflow_history_tenant_index_exists(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    indexes = inspect(engine).get_indexes("workflow_config_history")
+
+    indexed_columns = {
+        tuple(index["column_names"])
+        for index in indexes
+    }
+
+    assert ("tenant_id",) in indexed_columns
+
+
+# #851
+def test_alembic_new_tables_have_tenant_foreign_keys(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
+
+    for table_name in (
+        "policies",
+        "policy_history",
+        "workflow_configs",
+        "workflow_config_history",
+    ):
+        foreign_keys = inspector.get_foreign_keys(table_name)
+
+        assert any(
+            fk["referred_table"] == "tenants"
+            and fk["constrained_columns"] == ["tenant_id"]
+            and fk["referred_columns"] == ["id"]
+            for fk in foreign_keys
+        )
