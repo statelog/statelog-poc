@@ -851,3 +851,277 @@ def test_alembic_new_tables_column_types_match_orm(tmp_path, monkeypatch):
             orm_type = orm_columns[column_name]
 
             assert migrated_type._type_affinity is orm_type._type_affinity
+
+# #854
+def test_alembic_new_tables_primary_keys_match_orm(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    from app.models import (
+        PolicyHistory,
+        PolicyRecord,
+        WorkflowConfigHistory,
+        WorkflowConfigRecord,
+    )
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    inspector = inspect(create_engine(database_url))
+    tables = {
+        "policies": PolicyRecord,
+        "policy_history": PolicyHistory,
+        "workflow_configs": WorkflowConfigRecord,
+        "workflow_config_history": WorkflowConfigHistory,
+    }
+
+    for table_name, model in tables.items():
+        migrated_pk = set(
+            inspector.get_pk_constraint(table_name)["constrained_columns"]
+        )
+        orm_pk = {column.name for column in model.__table__.primary_key.columns}
+        assert migrated_pk == orm_pk
+
+
+# #855
+def test_alembic_new_tables_string_lengths_match_orm(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import String, create_engine, inspect
+
+    from app.models import (
+        PolicyHistory,
+        PolicyRecord,
+        WorkflowConfigHistory,
+        WorkflowConfigRecord,
+    )
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    inspector = inspect(create_engine(database_url))
+    tables = {
+        "policies": PolicyRecord,
+        "policy_history": PolicyHistory,
+        "workflow_configs": WorkflowConfigRecord,
+        "workflow_config_history": WorkflowConfigHistory,
+    }
+
+    for table_name, model in tables.items():
+        migrated = {
+            column["name"]: column["type"].length
+            for column in inspector.get_columns(table_name)
+            if isinstance(column["type"], String)
+        }
+        orm = {
+            column.name: column.type.length
+            for column in model.__table__.columns
+            if isinstance(column.type, String)
+        }
+        assert migrated == orm
+
+
+# #856
+def test_alembic_policy_history_policy_id_index_is_single_column(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes("policy_history")
+
+    assert any(
+        index["column_names"] == ["policy_id"] and not index["unique"]
+        for index in indexes
+    )
+
+
+# #857
+def test_alembic_policy_history_tenant_index_is_single_column(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes("policy_history")
+
+    assert any(
+        index["column_names"] == ["tenant_id"] and not index["unique"]
+        for index in indexes
+    )
+
+
+# #858
+def test_alembic_workflow_history_tenant_index_is_single_column(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes(
+        "workflow_config_history"
+    )
+
+    assert any(
+        index["column_names"] == ["tenant_id"] and not index["unique"]
+        for index in indexes
+    )
+
+
+# #859
+def test_alembic_policies_tenant_index_is_non_unique(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes("policies")
+
+    assert any(
+        index["column_names"] == ["tenant_id"] and not index["unique"]
+        for index in indexes
+    )
+
+
+# #860
+def test_alembic_policies_name_index_is_non_unique(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes("policies")
+
+    assert any(
+        index["column_names"] == ["name"] and not index["unique"]
+        for index in indexes
+    )
+
+
+# #861
+def test_alembic_policy_unique_constraint_is_exactly_tenant_name(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    constraints = inspect(create_engine(database_url)).get_unique_constraints(
+        "policies"
+    )
+
+    matching = [
+        constraint
+        for constraint in constraints
+        if constraint["name"] == "uq_policy_name_per_tenant"
+    ]
+
+    assert len(matching) == 1
+    assert matching[0]["column_names"] == ["tenant_id", "name"]
+
+
+# #862
+def test_alembic_new_table_tenant_foreign_keys_are_not_duplicated(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    inspector = inspect(create_engine(database_url))
+
+    for table_name in (
+        "policies",
+        "policy_history",
+        "workflow_configs",
+        "workflow_config_history",
+    ):
+        tenant_fks = [
+            fk
+            for fk in inspector.get_foreign_keys(table_name)
+            if fk["constrained_columns"] == ["tenant_id"]
+            and fk["referred_table"] == "tenants"
+            and fk["referred_columns"] == ["id"]
+        ]
+
+        assert len(tenant_fks) == 1
+
+
+# #863
+def test_alembic_new_tables_have_no_unexpected_unique_constraints(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    inspector = inspect(create_engine(database_url))
+
+    expected = {
+        "policies": {("tenant_id", "name")},
+        "policy_history": set(),
+        "workflow_configs": set(),
+        "workflow_config_history": set(),
+    }
+
+    for table_name, expected_constraints in expected.items():
+        actual = {
+            tuple(constraint["column_names"])
+            for constraint in inspector.get_unique_constraints(table_name)
+        }
+
+        assert actual == expected_constraints
