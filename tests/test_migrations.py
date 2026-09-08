@@ -1,6 +1,6 @@
 import importlib.util
 from pathlib import Path
-
+from app.config import settings
 
 MIGRATION_DIR = Path("alembic/versions")
 
@@ -40,6 +40,8 @@ def test_migration_files_are_present_in_expected_order():
         "0002_v81_security_hardening.py",
         "0003_v82_key_rotation_and_webhooks.py",
         "0004_v83_replay_explainability.py",
+        "0005_request_log_policy_fields.py",
+        "0006_policy_and_workflow_tables.py",
     ]
 
 
@@ -263,3 +265,362 @@ def test_v83_adds_and_removes_replay_explainability_columns():
         'op.drop_column("request_logs", "decision_source")'
         in source
     )
+
+# #835
+def test_alembic_upgrade_head_creates_expected_tables(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        database_url,
+    )
+
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url)
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
+
+    expected_tables = {
+        "tenants",
+        "client_credentials",
+        "devices",
+        "access_rights",
+        "request_logs",
+        "webhook_subscriptions",
+        "outbox_events",
+        "webhook_delivery_attempts",
+    }
+
+    assert expected_tables.issubset(set(inspector.get_table_names()))
+
+
+# #836
+def test_alembic_upgrade_head_request_logs_has_replay_columns(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        database_url,
+    )
+
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url)
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("request_logs")
+    }
+
+    assert "decision_source" in columns
+    assert "decision_path" in columns
+
+
+# #837
+def test_alembic_upgrade_head_webhook_subscription_has_encrypted_secret(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        database_url,
+    )
+
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url)
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns(
+            "webhook_subscriptions"
+        )
+    }
+
+    assert "signing_secret_encrypted" in columns
+    assert "signing_secret_key_version" in columns
+
+
+# #838
+def test_alembic_upgrade_head_creates_delivery_attempt_table(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        database_url,
+    )
+
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url)
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns(
+            "webhook_delivery_attempts"
+        )
+    }
+
+    assert {
+        "id",
+        "event_id",
+        "subscription_id",
+        "attempt_number",
+        "successful",
+        "response_status_code",
+        "error_message",
+        "signature_version",
+        "created_at",
+    }.issubset(columns)
+
+
+# #839
+def test_alembic_upgrade_head_request_log_columns_match_orm(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    from app.models import RequestLog
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        database_url,
+    )
+
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url)
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    migrated_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("request_logs")
+    }
+
+    orm_columns = {
+        column.name
+        for column in RequestLog.__table__.columns
+    }
+
+    assert migrated_columns == orm_columns
+
+# #840
+def test_v85_revision_follows_v83():
+    migration = load_migration(
+        MIGRATION_DIR / "0005_request_log_policy_fields.py"
+    )
+
+    assert migration.revision == "0005_request_log_policy_fields"
+    assert migration.down_revision == "0004_v83"
+
+
+# #841
+def test_alembic_upgrade_head_contains_policy_tables(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        database_url,
+    )
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    tables = set(inspect(engine).get_table_names())
+
+    assert "policies" in tables
+    assert "policy_history" in tables
+
+
+# #842
+def test_alembic_upgrade_head_contains_workflow_tables(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        database_url,
+    )
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    tables = set(inspect(engine).get_table_names())
+
+    assert "workflow_configs" in tables
+    assert "workflow_config_history" in tables
+
+# #843
+def test_alembic_policy_columns_match_orm(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    from app.models import PolicyRecord
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+
+    migrated_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("policies")
+    }
+
+    orm_columns = {
+        column.name
+        for column in PolicyRecord.__table__.columns
+    }
+
+    assert migrated_columns == orm_columns
+
+
+# #844
+def test_alembic_policy_history_columns_match_orm(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    from app.models import PolicyHistory
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+
+    migrated_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("policy_history")
+    }
+
+    orm_columns = {
+        column.name
+        for column in PolicyHistory.__table__.columns
+    }
+
+    assert migrated_columns == orm_columns
+
+
+# #845
+def test_alembic_workflow_config_columns_match_orm(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    from app.models import WorkflowConfigRecord
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+
+    migrated_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("workflow_configs")
+    }
+
+    orm_columns = {
+        column.name
+        for column in WorkflowConfigRecord.__table__.columns
+    }
+
+    assert migrated_columns == orm_columns
+
+
+# #846
+def test_alembic_workflow_history_columns_match_orm(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    from app.models import WorkflowConfigHistory
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+
+    migrated_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns(
+            "workflow_config_history"
+        )
+    }
+
+    orm_columns = {
+        column.name
+        for column in WorkflowConfigHistory.__table__.columns
+    }
+
+    assert migrated_columns == orm_columns
