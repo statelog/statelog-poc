@@ -801,3 +801,53 @@ def test_alembic_new_tables_nullable_matches_orm(tmp_path, monkeypatch):
         }
 
         assert migrated_nullable == orm_nullable
+
+# #853
+def test_alembic_new_tables_column_types_match_orm(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    from app.models import (
+        PolicyHistory,
+        PolicyRecord,
+        WorkflowConfigHistory,
+        WorkflowConfigRecord,
+    )
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
+
+    tables = {
+        "policies": PolicyRecord,
+        "policy_history": PolicyHistory,
+        "workflow_configs": WorkflowConfigRecord,
+        "workflow_config_history": WorkflowConfigHistory,
+    }
+
+    for table_name, model in tables.items():
+        migrated_columns = {
+            column["name"]: column["type"]
+            for column in inspector.get_columns(table_name)
+        }
+
+        orm_columns = {
+            column.name: column.type
+            for column in model.__table__.columns
+        }
+
+        assert migrated_columns.keys() == orm_columns.keys()
+
+        for column_name in migrated_columns:
+            migrated_type = migrated_columns[column_name]
+            orm_type = orm_columns[column_name]
+
+            assert migrated_type._type_affinity is orm_type._type_affinity
