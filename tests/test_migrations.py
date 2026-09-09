@@ -1125,3 +1125,265 @@ def test_alembic_new_tables_have_no_unexpected_unique_constraints(tmp_path, monk
         }
 
         assert actual == expected_constraints
+
+# #864
+def test_alembic_downgrade_from_head_to_0005_removes_new_tables(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0005_request_log_policy_fields")
+
+    tables = set(inspect(create_engine(database_url)).get_table_names())
+
+    assert "policies" not in tables
+    assert "policy_history" not in tables
+    assert "workflow_configs" not in tables
+    assert "workflow_config_history" not in tables
+
+
+# #865
+def test_alembic_downgrade_to_0005_preserves_request_log_policy_fields(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0005_request_log_policy_fields")
+
+    columns = {
+        column["name"]
+        for column in inspect(create_engine(database_url)).get_columns("request_logs")
+    }
+
+    assert {
+        "transaction_amount",
+        "new_owner_id",
+        "risk_signals",
+        "policy_matched",
+        "policy_name",
+        "policy_id",
+        "policy_version",
+        "workflow_version",
+    } <= columns
+
+
+# #866
+def test_alembic_downgrade_from_0005_to_0004_removes_request_log_policy_fields(
+    tmp_path, monkeypatch
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "0005_request_log_policy_fields")
+    command.downgrade(config, "0004_v83")
+
+    columns = {
+        column["name"]
+        for column in inspect(create_engine(database_url)).get_columns("request_logs")
+    }
+
+    removed = {
+        "transaction_amount",
+        "new_owner_id",
+        "risk_signals",
+        "policy_matched",
+        "policy_name",
+        "policy_id",
+        "policy_version",
+        "workflow_version",
+    }
+
+    assert columns.isdisjoint(removed)
+
+
+# #867
+def test_alembic_downgrade_to_0004_preserves_replay_columns(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0004_v83")
+
+    columns = {
+        column["name"]
+        for column in inspect(create_engine(database_url)).get_columns("request_logs")
+    }
+
+    assert "decision_source" in columns
+    assert "decision_path" in columns
+
+
+# #868
+def test_alembic_round_trip_0005_to_head_restores_new_tables(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0005_request_log_policy_fields")
+    command.upgrade(config, "head")
+
+    tables = set(inspect(create_engine(database_url)).get_table_names())
+
+    assert {
+        "policies",
+        "policy_history",
+        "workflow_configs",
+        "workflow_config_history",
+    } <= tables
+
+
+# #869
+def test_alembic_round_trip_0004_to_head_restores_request_log_fields(
+    tmp_path, monkeypatch
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0004_v83")
+    command.upgrade(config, "head")
+
+    columns = {
+        column["name"]
+        for column in inspect(create_engine(database_url)).get_columns("request_logs")
+    }
+
+    assert {
+        "transaction_amount",
+        "new_owner_id",
+        "risk_signals",
+        "policy_matched",
+        "policy_name",
+        "policy_id",
+        "policy_version",
+        "workflow_version",
+    } <= columns
+
+
+# #870
+def test_alembic_round_trip_restores_policy_indexes(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0005_request_log_policy_fields")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes("policies")
+    indexed_columns = {tuple(index["column_names"]) for index in indexes}
+
+    assert ("tenant_id",) in indexed_columns
+    assert ("name",) in indexed_columns
+
+
+# #871
+def test_alembic_round_trip_restores_policy_unique_constraint(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0005_request_log_policy_fields")
+    command.upgrade(config, "head")
+
+    constraints = inspect(create_engine(database_url)).get_unique_constraints("policies")
+
+    assert any(
+        constraint["name"] == "uq_policy_name_per_tenant"
+        and constraint["column_names"] == ["tenant_id", "name"]
+        for constraint in constraints
+    )
+
+
+# #872
+def test_alembic_round_trip_restores_request_log_policy_index(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0004_v83")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes("request_logs")
+
+    assert any(
+        index["column_names"] == ["policy_id"] and not index["unique"]
+        for index in indexes
+    )
+
+
+# #873
+def test_alembic_full_round_trip_returns_to_head_revision(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0004_v83")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        revision = connection.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalar_one()
+
+    assert revision == "0006_policy_and_workflow_tables"
