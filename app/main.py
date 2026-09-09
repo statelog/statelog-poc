@@ -1032,6 +1032,92 @@ def token_issue(payload: TokenIssueRequest, db: Session = Depends(get_db), clien
     )
     return {"token": token}
 
+def build_idempotent_decision_response(existing_log: RequestLog) -> DecisionResponse:
+    existing_risk_signals = [
+        signal
+        for signal in existing_log.risk_signals.split(",")
+        if signal
+    ]
+
+    existing_trust_score = max(
+        0,
+        min(100, 100 - existing_log.risk_score),
+    )
+
+    existing_decision_path: list[str] = []
+    if existing_log.decision_path:
+        try:
+            loaded_decision_path = json.loads(existing_log.decision_path)
+        except (json.JSONDecodeError, TypeError):
+            loaded_decision_path = []
+
+        if (
+            isinstance(loaded_decision_path, list)
+            and all(
+                isinstance(item, str)
+                for item in loaded_decision_path
+            )
+        ):
+            existing_decision_path = loaded_decision_path
+
+    existing_workflow_version = (
+        existing_log.workflow_version
+        if existing_log.workflow_version is not None
+        else 1
+    )
+
+    existing_explanation = {
+        "risk": {
+            "score": existing_log.risk_score,
+            "trust_score": existing_trust_score,
+            "signals": existing_risk_signals,
+            "total_contribution": sum(
+                RISK_SIGNAL_SCORES.get(signal, 0)
+                for signal in existing_risk_signals
+            ),
+            "contributors": [
+                {
+                    "signal": signal,
+                    "score": RISK_SIGNAL_SCORES.get(signal, 0),
+                }
+                for signal in existing_risk_signals
+            ],
+            "reason": existing_log.reason,
+        },
+        "policy": {
+            "matched": existing_log.policy_matched,
+            "name": existing_log.policy_name,
+            "version": existing_log.policy_version,
+            "reason": (
+                existing_log.reason
+                if existing_log.policy_matched
+                else "no_policy_match"
+            ),
+        },
+        "final": {
+            "allow": existing_log.allowed,
+            "reason": existing_log.reason,
+            "decision_source": existing_log.decision_source,
+            "decision_path": existing_decision_path,
+            "workflow_version": existing_workflow_version,
+        },
+    }
+
+    return DecisionResponse(
+        allow=existing_log.allowed,
+        reason=existing_log.reason,
+        risk_score=existing_log.risk_score,
+        trust_score=existing_trust_score,
+        trace_id=existing_log.trace_id,
+        decision_version=existing_log.decision_version,
+        workflow_version=existing_workflow_version,
+        idempotency_key=existing_log.idempotency_key,
+        policy_matched=existing_log.policy_matched,
+        policy_name=existing_log.policy_name,
+        risk_signals=existing_risk_signals,
+        explanation=existing_explanation,
+    )
+
 @app.post("/request/access", response_model=DecisionResponse)
 def request_access(payload: AccessRequest, request: Request, db: Session = Depends(get_db), client: ClientCredential = Depends(get_client)):
     started = time.perf_counter()
@@ -1107,92 +1193,8 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         )
     )
     if existing_log and explicit_idempotency_key is not None:
-        existing_risk_signals = [
-            signal
-            for signal in existing_log.risk_signals.split(",")
-            if signal
-        ]
+        return build_idempotent_decision_response(existing_log)
 
-        existing_trust_score = max(
-            0,
-            min(100, 100 - existing_log.risk_score),
-        )
-
-        existing_decision_path: list[str] = []
-        if existing_log.decision_path:
-            try:
-                loaded_decision_path = json.loads(
-                    existing_log.decision_path
-                )
-            except (json.JSONDecodeError, TypeError):
-                loaded_decision_path = []
-
-            if (
-                isinstance(loaded_decision_path, list)
-                and all(
-                    isinstance(item, str)
-                    for item in loaded_decision_path
-                )
-            ):
-                existing_decision_path = loaded_decision_path
-
-        existing_workflow_version = (
-            existing_log.workflow_version
-            if existing_log.workflow_version is not None
-            else 1
-        )
-
-        existing_explanation = {
-            "risk": {
-                "score": existing_log.risk_score,
-                "trust_score": existing_trust_score,
-                "signals": existing_risk_signals,
-                "total_contribution": sum(
-                RISK_SIGNAL_SCORES.get(signal, 0)
-                for signal in existing_risk_signals
-            ),
-            "contributors": [
-                {
-                    "signal": signal,
-                    "score": RISK_SIGNAL_SCORES.get(signal, 0),
-                }
-                for signal in existing_risk_signals
-            ],
-            "reason": existing_log.reason,
-        },
-        "policy": {
-            "matched": existing_log.policy_matched,
-            "name": existing_log.policy_name,
-            "version": existing_log.policy_version,
-            "reason": (
-                existing_log.reason
-                if existing_log.policy_matched
-                else "no_policy_match"
-            ),
-        },
-        "final": {
-            "allow": existing_log.allowed,
-            "reason": existing_log.reason,
-            "decision_source": existing_log.decision_source,
-            "decision_path": existing_decision_path,
-            "workflow_version": existing_workflow_version,
-        },
-    }
-
-        return DecisionResponse(
-        allow=existing_log.allowed,
-        reason=existing_log.reason,
-        risk_score=existing_log.risk_score,
-        trust_score=existing_trust_score,
-        trace_id=existing_log.trace_id,
-        decision_version=existing_log.decision_version,
-        workflow_version=existing_workflow_version,
-        idempotency_key=existing_log.idempotency_key,
-        policy_matched=existing_log.policy_matched,
-        policy_name=existing_log.policy_name,
-        risk_signals=existing_risk_signals,
-        explanation=existing_explanation,
-        )
     replay_ttl = max(int(claims.get("exp", 0)) - int(time.time()), 1)
     replay_jti = claims.get("jti") or "missing-jti"
     if not replay_store.mark_if_first_seen(tenant_id=claims["tenant_id"], jti=replay_jti, ttl_seconds=replay_ttl):
@@ -1324,7 +1326,27 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         },
     )
 
-    commit_or_409(db, detail="duplicate_request")
+    try:
+        commit_or_409(db, detail="duplicate_request")
+    except HTTPException as exc:
+        if (
+            exc.status_code != 409
+            or exc.detail != "duplicate_request"
+            or explicit_idempotency_key is None
+        ):
+            raise
+
+        winning_log = db.scalar(
+            select(RequestLog).where(
+                RequestLog.tenant_id == tenant.id,
+                RequestLog.idempotency_key == idempotency_key,
+            )
+        )
+
+        if winning_log is None:
+            raise
+
+        return build_idempotent_decision_response(winning_log)
 
     REQUEST_COUNTER.labels(
         tenant_id=tenant.id,

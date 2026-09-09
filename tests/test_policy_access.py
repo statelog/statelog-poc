@@ -5011,3 +5011,363 @@ def test_idempotent_retry_preserves_explanation_and_workflow_version(client):
     assert second.status_code == 200
     assert second.json()["workflow_version"] == first.json()["workflow_version"]
     assert second.json()["explanation"] == first.json()["explanation"]
+
+# #874
+def test_idempotency_race_recovers_winning_request(client, monkeypatch):
+    from fastapi import HTTPException
+    import app.main as main_module
+
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.5.9",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "race-recovery-idem",
+    }
+
+    original_commit_or_409 = main_module.commit_or_409
+    injected = False
+
+    def racing_commit(db, detail="already_exists"):
+        nonlocal injected
+
+        if detail == "duplicate_request" and not injected:
+            injected = True
+
+            pending_log = next(
+                obj
+                for obj in db.new
+                if isinstance(obj, RequestLog)
+                and obj.idempotency_key == "race-recovery-idem"
+            )
+
+            winner_values = {
+                column.name: getattr(pending_log, column.name)
+                for column in RequestLog.__table__.columns
+                if column.name != "id"
+            }
+
+            db.rollback()
+
+            winner = RequestLog(**winner_values)
+            db.add(winner)
+            db.commit()
+
+            raise HTTPException(
+                status_code=409,
+                detail="duplicate_request",
+            )
+
+        return original_commit_or_409(db, detail)
+
+    monkeypatch.setattr(main_module, "commit_or_409", racing_commit)
+
+    response = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["idempotency_key"] == "race-recovery-idem"
+
+    with SessionLocal() as db:
+        logs = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.tenant_id == "tenant-demo",
+                RequestLog.idempotency_key == "race-recovery-idem",
+            )
+            .all()
+        )
+
+        assert len(logs) == 1
+        assert body["allow"] == logs[0].allowed
+        assert body["reason"] == logs[0].reason
+        assert body["risk_score"] == logs[0].risk_score
+
+def _install_idempotency_race_winner(
+    monkeypatch,
+    idempotency_key,
+    *,
+    winner_overrides=None,
+):
+    from fastapi import HTTPException
+    import app.main as main_module
+
+    original_commit_or_409 = main_module.commit_or_409
+    injected = False
+
+    def racing_commit(db, detail="already_exists"):
+        nonlocal injected
+
+        if detail == "duplicate_request" and not injected:
+            injected = True
+
+            pending_log = next(
+                obj
+                for obj in db.new
+                if isinstance(obj, RequestLog)
+                and obj.idempotency_key == idempotency_key
+            )
+
+            winner_values = {
+                column.name: getattr(pending_log, column.name)
+                for column in RequestLog.__table__.columns
+                if column.name != "id"
+            }
+
+            if winner_overrides:
+                winner_values.update(winner_overrides)
+
+            db.rollback()
+
+            winner = RequestLog(**winner_values)
+            db.add(winner)
+            db.commit()
+
+            raise HTTPException(
+                status_code=409,
+                detail="duplicate_request",
+            )
+
+        return original_commit_or_409(db, detail)
+
+    monkeypatch.setattr(main_module, "commit_or_409", racing_commit)
+
+# #875
+def test_idempotency_race_preserves_full_response_shape(client, monkeypatch):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.6.1",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "race-full-response-idem",
+    }
+
+    _install_idempotency_race_winner(
+        monkeypatch,
+        "race-full-response-idem",
+    )
+
+    response = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert set(body) == {
+        "allow",
+        "reason",
+        "risk_score",
+        "trust_score",
+        "trace_id",
+        "decision_version",
+        "workflow_version",
+        "idempotency_key",
+        "policy_matched",
+        "policy_name",
+        "risk_signals",
+        "explanation",
+    }
+
+
+# #876
+def test_idempotency_race_preserves_policy_metadata(client, monkeypatch):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.6.2",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "race-policy-metadata-idem",
+    }
+
+    _install_idempotency_race_winner(
+        monkeypatch,
+        "race-policy-metadata-idem",
+        winner_overrides={
+            "allowed": False,
+            "reason": "policy_deny:race-policy",
+            "policy_matched": True,
+            "policy_name": "race-policy",
+            "policy_id": 42,
+            "policy_version": 7,
+        },
+    )
+
+    response = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["allow"] is False
+    assert body["reason"] == "policy_deny:race-policy"
+    assert body["policy_matched"] is True
+    assert body["policy_name"] == "race-policy"
+    assert body["explanation"]["policy"]["matched"] is True
+    assert body["explanation"]["policy"]["name"] == "race-policy"
+    assert body["explanation"]["policy"]["version"] == 7
+
+
+# #877
+def test_idempotency_race_preserves_workflow_explanation(client, monkeypatch):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.6.3",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "race-workflow-idem",
+    }
+
+    _install_idempotency_race_winner(
+        monkeypatch,
+        "race-workflow-idem",
+        winner_overrides={
+            "workflow_version": 9,
+            "decision_source": "policy",
+            "decision_path": '["risk_evaluated","policy_checked","policy_matched","final_deny"]',
+            "allowed": False,
+        },
+    )
+
+    response = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["workflow_version"] == 9
+    assert body["explanation"]["final"]["decision_source"] == "policy"
+    assert body["explanation"]["final"]["decision_path"] == [
+        "risk_evaluated",
+        "policy_checked",
+        "policy_matched",
+        "final_deny",
+    ]
+    assert body["explanation"]["final"]["workflow_version"] == 9
+
+
+# #878
+def test_idempotency_race_handles_corrupt_decision_path(client, monkeypatch):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.6.4",
+        "country_code": "EE",
+        "token": token,
+    }
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "race-corrupt-path-idem",
+    }
+
+    _install_idempotency_race_winner(
+        monkeypatch,
+        "race-corrupt-path-idem",
+        winner_overrides={
+            "decision_path": "{not-valid-json",
+        },
+    )
+
+    response = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["explanation"]["final"]["decision_path"] == []
+
+
+# #879
+def test_idempotency_race_without_explicit_key_still_returns_409(
+    client,
+    monkeypatch,
+):
+    from fastapi import HTTPException
+    import app.main as main_module
+
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.6.5",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    original_commit_or_409 = main_module.commit_or_409
+    injected = False
+
+    def racing_commit(db, detail="already_exists"):
+        nonlocal injected
+
+        if detail == "duplicate_request" and not injected:
+            injected = True
+            db.rollback()
+
+            raise HTTPException(
+                status_code=409,
+                detail="duplicate_request",
+            )
+
+        return original_commit_or_409(db, detail)
+
+    monkeypatch.setattr(main_module, "commit_or_409", racing_commit)
+
+    response = client.post(
+        "/request/access",
+        headers=HEADERS,
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "duplicate_request"
