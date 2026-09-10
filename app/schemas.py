@@ -8,7 +8,7 @@ class TenantCreate(BaseModel):
     tenant_id: str = Field(min_length=1, pattern=r".*\S.*")
     name: str
     plan: str = "starter"
-    monthly_quota: int = 1000
+    monthly_quota: int = Field(default=1000, ge=1)
 
 class WorkflowConfigUpdate(BaseModel):
     tenant_id: str

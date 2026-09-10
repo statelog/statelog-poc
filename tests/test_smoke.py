@@ -529,3 +529,91 @@ def test_invalid_token_returns_401(client):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_token"
+
+# #891
+def test_tenant_negative_monthly_quota_is_rejected(client):
+    response = client.post(
+        "/admin/tenants",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-negative-quota",
+            "name": "Negative Quota Tenant",
+            "plan": "pro",
+            "monthly_quota": -1,
+        },
+    )
+
+    assert response.status_code == 422
+
+# #892
+def test_tenant_zero_monthly_quota_is_rejected(client):
+    response = client.post(
+        "/admin/tenants",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-zero-quota",
+            "name": "Zero Quota Tenant",
+            "plan": "pro",
+            "monthly_quota": 0,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+# #893
+def test_tenant_monthly_quota_one_is_allowed(client):
+    response = client.post(
+        "/admin/tenants",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-min-quota",
+            "name": "Minimum Quota Tenant",
+            "plan": "pro",
+            "monthly_quota": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["tenant_id"] == "tenant-min-quota"
+
+
+# #894
+def test_tenant_default_monthly_quota_is_1000(client):
+    response = client.post(
+        "/admin/tenants",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-default-quota",
+            "name": "Default Quota Tenant",
+            "plan": "pro",
+        },
+    )
+
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-default-quota")
+        assert tenant is not None
+        assert tenant.monthly_quota == 1000
+
+
+# #895
+def test_tenant_monthly_quota_is_persisted(client):
+    response = client.post(
+        "/admin/tenants",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-custom-quota",
+            "name": "Custom Quota Tenant",
+            "plan": "pro",
+            "monthly_quota": 2500,
+        },
+    )
+
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-custom-quota")
+        assert tenant is not None
+        assert tenant.monthly_quota == 2500
