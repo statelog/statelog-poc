@@ -1193,6 +1193,15 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         )
     )
     if existing_log and explicit_idempotency_key is not None:
+        if not constant_time_equals(
+            existing_log.request_fingerprint,
+            fingerprint,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="idempotency_key_conflict",
+            )
+
         return build_idempotent_decision_response(existing_log)
 
     replay_ttl = max(int(claims.get("exp", 0)) - int(time.time()), 1)
@@ -1345,6 +1354,15 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
 
         if winning_log is None:
             raise
+
+        if not constant_time_equals(
+            winning_log.request_fingerprint,
+            fingerprint,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="idempotency_key_conflict",
+            )
 
         return build_idempotent_decision_response(winning_log)
 

@@ -5371,3 +5371,83 @@ def test_idempotency_race_without_explicit_key_still_returns_409(
 
     assert response.status_code == 409
     assert response.json()["detail"] == "duplicate_request"
+
+# #880
+def test_idempotency_key_rejects_different_request_fingerprint(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "same-key-different-request",
+    }
+
+    first_payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.7.1",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    second_payload = {
+        **first_payload,
+        "ip_address": "10.71.7.2",
+    }
+
+    first = client.post(
+        "/request/access",
+        headers=headers,
+        json=first_payload,
+    )
+
+    second = client.post(
+        "/request/access",
+        headers=headers,
+        json=second_payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"] == "idempotency_key_conflict"
+
+
+# #881
+def test_idempotency_race_rejects_different_request_fingerprint(
+    client,
+    monkeypatch,
+):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.7.3",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "race-different-fingerprint",
+    }
+
+    _install_idempotency_race_winner(
+        monkeypatch,
+        "race-different-fingerprint",
+        winner_overrides={
+            "request_fingerprint": "different-winning-fingerprint",
+        },
+    )
+
+    response = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency_key_conflict"
