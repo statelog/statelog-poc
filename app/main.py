@@ -1164,7 +1164,6 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
     tenant = db.get(Tenant, claims["tenant_id"])
     if not tenant:
         raise HTTPException(status_code=404, detail="tenant_not_found")
-    enforce_tenant_quota(tenant)
 
     right = db.scalar(select(AccessRight).where(AccessRight.tenant_id == tenant.id, AccessRight.right_id == claims["right_id"]))
     if not right or not right.valid:
@@ -1210,6 +1209,8 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
             )
 
         return build_idempotent_decision_response(existing_log)
+    
+    enforce_tenant_quota(tenant)
 
     replay_ttl = max(int(claims.get("exp", 0)) - int(time.time()), 1)
     replay_jti = claims.get("jti") or "missing-jti"

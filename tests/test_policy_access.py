@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from app.time_utils import utcnow_naive
 from app.services.privacy_service import pseudonymize_ip
-from app.models import PolicyRecord, RequestLog
+from app.models import PolicyRecord, RequestLog, Tenant
 from app.models import PolicyRecord
 
 from tests.test_smoke import ADMIN_HEADERS, HEADERS, ensure_setup, issue_token, access_request
@@ -5705,3 +5705,122 @@ def test_trimmed_idempotency_key_longer_than_128_is_rejected(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "invalid_idempotency_key"
+
+# #897
+def test_policy_denied_decision_increments_tenant_usage_count(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        tenant.usage_count = 0
+
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="usage-deny-policy",
+                effect="deny",
+                priority=10,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is False
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 1
+
+# #898
+def test_idempotent_retry_does_not_increment_tenant_usage_twice(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.8.8",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "quota-idempotent-retry",
+    }
+
+    first = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+    second = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 1
+
+# #899
+def test_idempotent_retry_still_succeeds_after_quota_is_reached(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        tenant.monthly_quota = 1
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.8.9",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "quota-boundary-idempotent-retry",
+    }
+
+    first = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    second = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 1
