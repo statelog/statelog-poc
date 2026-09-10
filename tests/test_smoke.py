@@ -617,3 +617,36 @@ def test_tenant_monthly_quota_is_persisted(client):
         tenant = db.get(Tenant, "tenant-custom-quota")
         assert tenant is not None
         assert tenant.monthly_quota == 2500
+
+# #896
+def test_quota_rejected_request_does_not_increment_usage_count(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant.monthly_quota = 1
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    first = access_request(client, token)
+    assert first.status_code == 200
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        assert tenant.usage_count == 1
+
+    next_token = issue_token(client).json()["token"]
+    rejected = access_request(
+        client,
+        next_token,
+        ip_address="10.0.0.11",
+    )
+
+    assert rejected.status_code == 429
+    assert rejected.json()["detail"] == "tenant_quota_exceeded"
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        assert tenant.usage_count == 1
