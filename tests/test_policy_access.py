@@ -5451,3 +5451,155 @@ def test_idempotency_race_rejects_different_request_fingerprint(
 
     assert response.status_code == 409
     assert response.json()["detail"] == "idempotency_key_conflict"
+
+# #882
+def test_blank_idempotency_key_uses_fingerprint(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.8.1",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "",
+        },
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["idempotency_key"] != ""
+
+
+# #883
+def test_whitespace_idempotency_key_uses_fingerprint(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.8.2",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "   ",
+        },
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["idempotency_key"].strip() != ""
+
+
+# #884
+def test_idempotency_key_is_trimmed(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.8.3",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "  trimmed-idempotency-key  ",
+        },
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["idempotency_key"] == "trimmed-idempotency-key"
+
+
+# #885
+def test_trimmed_idempotency_key_retries_same_request(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.8.4",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    first = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "  trimmed-retry-key  ",
+        },
+        json=payload,
+    )
+    second = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "trimmed-retry-key",
+        },
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+
+
+# #886
+def test_trimmed_idempotency_key_rejects_different_request(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    first_payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.8.5",
+        "country_code": "EE",
+        "token": token,
+    }
+    second_payload = {
+        **first_payload,
+        "ip_address": "10.71.8.6",
+    }
+
+    first = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "  trimmed-conflict-key  ",
+        },
+        json=first_payload,
+    )
+    second = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "trimmed-conflict-key",
+        },
+        json=second_payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"] == "idempotency_key_conflict"
