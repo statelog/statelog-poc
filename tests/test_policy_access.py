@@ -5603,3 +5603,105 @@ def test_trimmed_idempotency_key_rejects_different_request(client):
     assert first.status_code == 200
     assert second.status_code == 409
     assert second.json()["detail"] == "idempotency_key_conflict"
+
+# #887
+def test_idempotency_key_longer_than_128_is_rejected(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.71.8.7",
+        "country_code": "EE",
+        "token": token,
+    }
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "x" * 129,
+        },
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_idempotency_key"
+
+# #888
+def test_idempotency_key_exactly_128_is_allowed(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    key = "x" * 128
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": key,
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.71.8.8",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["idempotency_key"] == key
+
+
+# #889
+def test_trimmed_idempotency_key_exactly_128_is_allowed(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    key = "y" * 128
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": f"  {key}  ",
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.71.8.9",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["idempotency_key"] == key
+
+
+# #890
+def test_trimmed_idempotency_key_longer_than_128_is_rejected(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    key = "z" * 129
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": f"  {key}  ",
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.71.8.10",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_idempotency_key"

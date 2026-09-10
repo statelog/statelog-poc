@@ -1186,8 +1186,13 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
     explicit_idempotency_key = request.headers.get("Idempotency-Key")
     if explicit_idempotency_key is not None:
         explicit_idempotency_key = explicit_idempotency_key.strip() or None
-    idempotency_key = explicit_idempotency_key or fingerprint
+        if explicit_idempotency_key is not None and len(explicit_idempotency_key) > 128:
+            raise HTTPException(
+                status_code=400,
+                detail="invalid_idempotency_key",
+            )
 
+    idempotency_key = explicit_idempotency_key or fingerprint
     existing_log = db.scalar(
         select(RequestLog).where(
             RequestLog.tenant_id == tenant.id,
