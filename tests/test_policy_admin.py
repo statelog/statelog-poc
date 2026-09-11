@@ -1,8 +1,18 @@
 import json
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timedelta
 from tests.test_smoke import ADMIN_HEADERS, ensure_setup, issue_token, access_request
 from app.database import SessionLocal
+from app.database import SessionLocal, get_db
 from app.models import OutboxEvent, PolicyHistory, Tenant
+from app.models import (
+    OutboxEvent,
+    PolicyHistory,
+    Tenant,
+    WorkflowConfigHistory,
+    WorkflowConfigRecord,
+)
 from app.main import (
     PolicyRecord,
     RequestLog,
@@ -18153,3 +18163,568 @@ def test_failed_replay_does_not_mutate_original_request_log(client):
         }
 
         assert actual == expected
+
+def test_failed_policy_update_does_not_mutate_current_policy(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "failed-update-current-policy",
+            "effect": "allow",
+            "priority": 17,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "max_risk_score": 80,
+            "min_trust_score": 20,
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    with SessionLocal() as db:
+        policy = db.get(PolicyRecord, policy_id)
+        assert policy is not None
+
+        before = {
+            "effect": policy.effect,
+            "priority": policy.priority,
+            "request_types": policy.request_types,
+            "countries": policy.countries,
+            "device_ids": policy.device_ids,
+            "max_risk_score": policy.max_risk_score,
+            "min_trust_score": policy.min_trust_score,
+            "enabled": policy.enabled,
+            "version": policy.version,
+        }
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"max_risk_score": -1},
+    )
+
+    assert response.status_code == 422
+
+    with SessionLocal() as db:
+        policy = db.get(PolicyRecord, policy_id)
+        assert policy is not None
+
+        after = {
+            "effect": policy.effect,
+            "priority": policy.priority,
+            "request_types": policy.request_types,
+            "countries": policy.countries,
+            "device_ids": policy.device_ids,
+            "max_risk_score": policy.max_risk_score,
+            "min_trust_score": policy.min_trust_score,
+            "enabled": policy.enabled,
+            "version": policy.version,
+        }
+
+    assert after == before
+
+
+def test_failed_policy_update_does_not_create_history(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "failed-update-no-history",
+            "effect": "allow",
+            "priority": 18,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    with SessionLocal() as db:
+        before_count = (
+            db.query(PolicyHistory)
+            .filter(PolicyHistory.policy_id == policy_id)
+            .count()
+        )
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={"min_trust_score": 101},
+    )
+
+    assert response.status_code == 422
+
+    with SessionLocal() as db:
+        after_count = (
+            db.query(PolicyHistory)
+            .filter(PolicyHistory.policy_id == policy_id)
+            .count()
+        )
+
+    assert after_count == before_count
+
+
+def test_missing_policy_delete_does_not_mutate_policy_state(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        policy_count_before = db.query(PolicyRecord).count()
+        history_count_before = db.query(PolicyHistory).count()
+
+    response = client.delete(
+        "/admin/policies/999999999",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "policy_not_found"
+
+    with SessionLocal() as db:
+        policy_count_after = db.query(PolicyRecord).count()
+        history_count_after = db.query(PolicyHistory).count()
+
+    assert policy_count_after == policy_count_before
+    assert history_count_after == history_count_before
+
+
+def test_unknown_tenant_workflow_update_creates_no_state(client):
+    ensure_setup(client)
+
+    tenant_id = "tenant-missing-workflow-integrity"
+
+    with SessionLocal() as db:
+        assert db.get(Tenant, tenant_id) is None
+
+        config_count_before = (
+            db.query(WorkflowConfigRecord)
+            .filter(WorkflowConfigRecord.tenant_id == tenant_id)
+            .count()
+        )
+        history_count_before = (
+            db.query(WorkflowConfigHistory)
+            .filter(WorkflowConfigHistory.tenant_id == tenant_id)
+            .count()
+        )
+
+    response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": tenant_id,
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "tenant_not_found"
+
+    with SessionLocal() as db:
+        config_count_after = (
+            db.query(WorkflowConfigRecord)
+            .filter(WorkflowConfigRecord.tenant_id == tenant_id)
+            .count()
+        )
+        history_count_after = (
+            db.query(WorkflowConfigHistory)
+            .filter(WorkflowConfigHistory.tenant_id == tenant_id)
+            .count()
+        )
+
+    assert config_count_after == config_count_before == 0
+    assert history_count_after == history_count_before == 0
+
+
+def test_failed_workflow_update_does_not_mutate_existing_tenant_state(client):
+    ensure_setup(client)
+
+    configured = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+        },
+    )
+
+    assert configured.status_code == 200
+
+    with SessionLocal() as db:
+        record = db.get(WorkflowConfigRecord, "tenant-demo")
+        assert record is not None
+
+        before = {
+            "include_risk_step": record.include_risk_step,
+            "include_policy_step": record.include_policy_step,
+            "execution_mode": record.execution_mode,
+            "version": record.version,
+        }
+
+        history_count_before = (
+            db.query(WorkflowConfigHistory)
+            .filter(WorkflowConfigHistory.tenant_id == "tenant-demo")
+            .count()
+        )
+
+    response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-missing-workflow-isolation",
+            "include_risk_step": True,
+            "include_policy_step": False,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "tenant_not_found"
+
+    with SessionLocal() as db:
+        record = db.get(WorkflowConfigRecord, "tenant-demo")
+        assert record is not None
+
+        after = {
+            "include_risk_step": record.include_risk_step,
+            "include_policy_step": record.include_policy_step,
+            "execution_mode": record.execution_mode,
+            "version": record.version,
+        }
+
+        history_count_after = (
+            db.query(WorkflowConfigHistory)
+            .filter(WorkflowConfigHistory.tenant_id == "tenant-demo")
+            .count()
+        )
+
+    assert after == before
+    assert history_count_after == history_count_before
+
+def test_policy_update_commit_failure_rolls_back_current_policy(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "atomic-policy-update-current",
+            "effect": "allow",
+            "priority": 31,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    with SessionLocal() as db:
+        policy = db.get(PolicyRecord, policy_id)
+        assert policy is not None
+        before_priority = policy.priority
+        before_version = policy.version
+
+    def failing_db():
+        db = SessionLocal()
+        original_commit = db.commit
+
+        def broken_commit():
+            raise SQLAlchemyError("forced_commit_failure")
+
+        db.commit = broken_commit
+        try:
+            yield db
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.commit = original_commit
+            db.close()
+
+    client.app.dependency_overrides[get_db] = failing_db
+    try:
+        with pytest.raises(SQLAlchemyError):
+            client.patch(
+                f"/admin/policies/{policy_id}",
+                headers=ADMIN_HEADERS,
+                json={"priority": 99},
+            )
+    finally:
+        client.app.dependency_overrides.pop(get_db, None)
+
+    with SessionLocal() as db:
+        policy = db.get(PolicyRecord, policy_id)
+        assert policy is not None
+        assert policy.priority == before_priority
+        assert policy.version == before_version
+
+
+def test_policy_update_commit_failure_rolls_back_history(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "atomic-policy-update-history",
+            "effect": "allow",
+            "priority": 32,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    with SessionLocal() as db:
+        history_before = (
+            db.query(PolicyHistory)
+            .filter(PolicyHistory.policy_id == policy_id)
+            .count()
+        )
+
+    def failing_db():
+        db = SessionLocal()
+
+        def broken_commit():
+            raise SQLAlchemyError("forced_commit_failure")
+
+        db.commit = broken_commit
+        try:
+            yield db
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    client.app.dependency_overrides[get_db] = failing_db
+    try:
+        with pytest.raises(SQLAlchemyError):
+            client.patch(
+                f"/admin/policies/{policy_id}",
+                headers=ADMIN_HEADERS,
+                json={"priority": 77},
+            )
+    finally:
+        client.app.dependency_overrides.pop(get_db, None)
+
+    with SessionLocal() as db:
+        history_after = (
+            db.query(PolicyHistory)
+            .filter(PolicyHistory.policy_id == policy_id)
+            .count()
+        )
+
+    assert history_after == history_before
+
+
+def test_policy_delete_commit_failure_restores_policy_and_history(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "atomic-policy-delete",
+            "effect": "deny",
+            "priority": 33,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    with SessionLocal() as db:
+        history_before = (
+            db.query(PolicyHistory)
+            .filter(PolicyHistory.policy_id == policy_id)
+            .count()
+        )
+
+    def failing_db():
+        db = SessionLocal()
+
+        def broken_commit():
+            raise SQLAlchemyError("forced_commit_failure")
+
+        db.commit = broken_commit
+        try:
+            yield db
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    client.app.dependency_overrides[get_db] = failing_db
+    try:
+        with pytest.raises(SQLAlchemyError):
+            client.delete(
+                f"/admin/policies/{policy_id}",
+                headers=ADMIN_HEADERS,
+            )
+    finally:
+        client.app.dependency_overrides.pop(get_db, None)
+
+    with SessionLocal() as db:
+        policy = db.get(PolicyRecord, policy_id)
+        assert policy is not None
+
+        history_after = (
+            db.query(PolicyHistory)
+            .filter(PolicyHistory.policy_id == policy_id)
+            .count()
+        )
+
+    assert history_after == history_before
+
+
+def test_workflow_update_commit_failure_rolls_back_current_config(client):
+    ensure_setup(client)
+
+    configured = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert configured.status_code == 200
+
+    with SessionLocal() as db:
+        record = db.get(WorkflowConfigRecord, "tenant-demo")
+        assert record is not None
+
+        before = {
+            "include_risk_step": record.include_risk_step,
+            "include_policy_step": record.include_policy_step,
+            "execution_mode": record.execution_mode,
+            "version": record.version,
+        }
+
+    def failing_db():
+        db = SessionLocal()
+
+        def broken_commit():
+            raise SQLAlchemyError("forced_commit_failure")
+
+        db.commit = broken_commit
+        try:
+            yield db
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    client.app.dependency_overrides[get_db] = failing_db
+    try:
+        with pytest.raises(SQLAlchemyError):
+            client.put(
+                "/admin/workflow-config",
+                headers=ADMIN_HEADERS,
+                json={
+                    "tenant_id": "tenant-demo",
+                    "include_risk_step": False,
+                    "include_policy_step": False,
+                    "execution_mode": "policy_first",
+                },
+            )
+    finally:
+        client.app.dependency_overrides.pop(get_db, None)
+
+    with SessionLocal() as db:
+        record = db.get(WorkflowConfigRecord, "tenant-demo")
+        assert record is not None
+
+        after = {
+            "include_risk_step": record.include_risk_step,
+            "include_policy_step": record.include_policy_step,
+            "execution_mode": record.execution_mode,
+            "version": record.version,
+        }
+
+    assert after == before
+
+
+def test_workflow_update_commit_failure_rolls_back_history(client):
+    ensure_setup(client)
+
+    configured = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert configured.status_code == 200
+
+    with SessionLocal() as db:
+        history_before = (
+            db.query(WorkflowConfigHistory)
+            .filter(WorkflowConfigHistory.tenant_id == "tenant-demo")
+            .count()
+        )
+
+    def failing_db():
+        db = SessionLocal()
+
+        def broken_commit():
+            raise SQLAlchemyError("forced_commit_failure")
+
+        db.commit = broken_commit
+        try:
+            yield db
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    client.app.dependency_overrides[get_db] = failing_db
+    try:
+        with pytest.raises(SQLAlchemyError):
+            client.put(
+                "/admin/workflow-config",
+                headers=ADMIN_HEADERS,
+                json={
+                    "tenant_id": "tenant-demo",
+                    "include_risk_step": False,
+                    "include_policy_step": True,
+                    "execution_mode": "policy_first",
+                },
+            )
+    finally:
+        client.app.dependency_overrides.pop(get_db, None)
+
+    with SessionLocal() as db:
+        history_after = (
+            db.query(WorkflowConfigHistory)
+            .filter(WorkflowConfigHistory.tenant_id == "tenant-demo")
+            .count()
+        )
+
+    assert history_after == history_before
