@@ -15,6 +15,7 @@ class WorkflowConfigUpdate(BaseModel):
     include_risk_step: bool = True
     include_policy_step: bool = True
     execution_mode: Literal["risk_first", "policy_first"] = "risk_first"
+    expected_version: Optional[int] = Field(default=None, ge=1)
 
 class ClientCreate(BaseModel):
     tenant_id: str
@@ -145,8 +146,8 @@ class PolicyCreate(BaseModel):
             raise ValueError("valid_from_must_not_be_after_expires_at")
 
         return self
-
 class PolicyUpdate(BaseModel):
+    expected_version: Optional[int] = Field(default=None, ge=1)
     effect: Optional[Literal["allow", "deny"]] = None
     priority: Optional[int] = None
 

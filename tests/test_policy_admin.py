@@ -18728,3 +18728,284 @@ def test_workflow_update_commit_failure_rolls_back_history(client):
         )
 
     assert history_after == history_before
+
+def test_policy_update_accepts_matching_expected_version(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "expected-version-policy-success",
+            "effect": "allow",
+            "priority": 41,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    body = created.json()
+    policy_id = body["id"]
+    original_version = body["version"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "expected_version": original_version,
+            "priority": 42,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["priority"] == 42
+    assert response.json()["version"] == original_version + 1
+
+
+def test_policy_update_rejects_stale_expected_version(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "expected-version-policy-stale",
+            "effect": "allow",
+            "priority": 43,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+    version = created.json()["version"]
+
+    first_update = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "expected_version": version,
+            "priority": 44,
+        },
+    )
+
+    assert first_update.status_code == 200
+    assert first_update.json()["version"] == version + 1
+
+    stale_update = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "expected_version": version,
+            "priority": 45,
+        },
+    )
+
+    assert stale_update.status_code == 409
+    assert stale_update.json()["detail"] == "policy_version_conflict"
+
+
+def test_stale_policy_update_does_not_mutate_state_or_history(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "expected-version-policy-integrity",
+            "effect": "deny",
+            "priority": 46,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+    version = created.json()["version"]
+
+    first_update = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "expected_version": version,
+            "priority": 47,
+        },
+    )
+
+    assert first_update.status_code == 200
+
+    with SessionLocal() as db:
+        policy = db.get(PolicyRecord, policy_id)
+        assert policy is not None
+
+        before = {
+            "priority": policy.priority,
+            "version": policy.version,
+            "effect": policy.effect,
+            "enabled": policy.enabled,
+        }
+
+        history_before = (
+            db.query(PolicyHistory)
+            .filter(PolicyHistory.policy_id == policy_id)
+            .count()
+        )
+
+    stale_update = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "expected_version": version,
+            "priority": 999,
+            "effect": "allow",
+            "enabled": False,
+        },
+    )
+
+    assert stale_update.status_code == 409
+    assert stale_update.json()["detail"] == "policy_version_conflict"
+
+    with SessionLocal() as db:
+        policy = db.get(PolicyRecord, policy_id)
+        assert policy is not None
+
+        after = {
+            "priority": policy.priority,
+            "version": policy.version,
+            "effect": policy.effect,
+            "enabled": policy.enabled,
+        }
+
+        history_after = (
+            db.query(PolicyHistory)
+            .filter(PolicyHistory.policy_id == policy_id)
+            .count()
+        )
+
+    assert after == before
+    assert history_after == history_before
+
+
+def test_workflow_update_accepts_matching_expected_version(client):
+    ensure_setup(client)
+
+    initial = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert initial.status_code == 200
+    version = initial.json()["version"]
+
+    response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+            "expected_version": version,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["include_risk_step"] is False
+    assert response.json()["execution_mode"] == "policy_first"
+    assert response.json()["version"] == version + 1
+
+
+def test_stale_workflow_update_does_not_mutate_state_or_history(client):
+    ensure_setup(client)
+
+    initial = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert initial.status_code == 200
+    version = initial.json()["version"]
+
+    first_update = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": True,
+            "execution_mode": "policy_first",
+            "expected_version": version,
+        },
+    )
+
+    assert first_update.status_code == 200
+
+    with SessionLocal() as db:
+        record = db.get(WorkflowConfigRecord, "tenant-demo")
+        assert record is not None
+
+        before = {
+            "include_risk_step": record.include_risk_step,
+            "include_policy_step": record.include_policy_step,
+            "execution_mode": record.execution_mode,
+            "version": record.version,
+        }
+
+        history_before = (
+            db.query(WorkflowConfigHistory)
+            .filter(WorkflowConfigHistory.tenant_id == "tenant-demo")
+            .count()
+        )
+
+    stale_update = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": False,
+            "execution_mode": "risk_first",
+            "expected_version": version,
+        },
+    )
+
+    assert stale_update.status_code == 409
+    assert stale_update.json()["detail"] == "workflow_version_conflict"
+
+    with SessionLocal() as db:
+        record = db.get(WorkflowConfigRecord, "tenant-demo")
+        assert record is not None
+
+        after = {
+            "include_risk_step": record.include_risk_step,
+            "include_policy_step": record.include_policy_step,
+            "execution_mode": record.execution_mode,
+            "version": record.version,
+        }
+
+        history_after = (
+            db.query(WorkflowConfigHistory)
+            .filter(WorkflowConfigHistory.tenant_id == "tenant-demo")
+            .count()
+        )
+
+    assert after == before
+    assert history_after == history_before
