@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from app.time_utils import utcnow_naive
 from app.services.privacy_service import pseudonymize_ip
-from app.models import PolicyRecord, RequestLog, Tenant
+from app.models import AccessRight, PolicyRecord, RequestLog, Tenant
 from app.models import PolicyRecord
 
 from tests.test_smoke import ADMIN_HEADERS, HEADERS, ensure_setup, issue_token, access_request
@@ -5824,3 +5824,160 @@ def test_idempotent_retry_still_succeeds_after_quota_is_reached(client):
     with SessionLocal() as db:
         tenant = db.get(Tenant, "tenant-demo")
         assert tenant.usage_count == 1
+
+# #908
+def test_allowed_access_increments_usage_count_once(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is True
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 1
+
+
+# #909
+def test_policy_allow_increments_usage_count_once(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+
+        db.add(
+            PolicyRecord(
+                tenant_id="tenant-demo",
+                name="usage-policy-allow",
+                effect="allow",
+                priority=1,
+                request_types="access",
+                countries="EE",
+                device_ids="",
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+    response = access_request(client, token)
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is True
+    assert response.json()["policy_matched"] is True
+    assert response.json()["policy_name"] == "usage-policy-allow"
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 1
+
+
+# #910
+def test_missing_new_owner_decision_increments_usage_count_once(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is False
+    assert response.json()["reason"] == "missing_new_owner_id"
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 1
+
+
+# #911
+def test_same_owner_transfer_decision_increments_usage_count_once(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        new_owner_id="user-123",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is False
+    assert response.json()["reason"] == "same_owner"
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 1
+
+
+# #912
+def test_successful_ownership_transfer_increments_usage_count_once(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        new_owner_id="user-456",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["allow"] is True
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 1
+
+        right = (
+            db.query(AccessRight)
+            .filter_by(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+            )
+            .one()
+        )
+        assert right.owner_id == "user-456"

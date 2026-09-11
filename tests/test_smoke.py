@@ -650,3 +650,825 @@ def test_quota_rejected_request_does_not_increment_usage_count(client):
     with SessionLocal() as db:
         tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
         assert tenant.usage_count == 1
+
+# #900
+def test_tenant_quota_is_isolated_between_tenants(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant_demo = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant_other = db.query(Tenant).filter_by(id="tenant-other").one()
+
+        tenant_demo.monthly_quota = 1
+        tenant_demo.usage_count = 1
+
+        tenant_other.monthly_quota = 1
+        tenant_other.usage_count = 0
+        db.commit()
+
+    demo_token = issue_token(client).json()["token"]
+
+    demo_response = access_request(
+        client,
+        demo_token,
+        ip_address="10.0.0.21",
+    )
+
+    assert demo_response.status_code == 429
+    assert demo_response.json()["detail"] == "tenant_quota_exceeded"
+
+    client.post(
+        "/rights/create",
+        headers=OTHER_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-quota-isolation",
+            "owner_id": "user-777",
+            "valid": True,
+        },
+    )
+
+    other_token_response = client.post(
+        "/token/issue",
+        headers=OTHER_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-quota-isolation",
+            "user_id": "user-777",
+            "device_id": "gate-X1",
+            "scope": "access",
+        },
+    )
+
+    assert other_token_response.status_code == 200
+    other_token = other_token_response.json()["token"]
+
+    other_response = client.post(
+        "/request/access",
+        headers=OTHER_HEADERS,
+        json={
+            "token": other_token,
+            "request_type": "access",
+            "device_id": "gate-X1",
+            "ip_address": "10.0.0.22",
+            "country_code": "EE",
+        },
+    )
+
+    assert other_response.status_code == 200
+
+    with SessionLocal() as db:
+        tenant_demo = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant_other = db.query(Tenant).filter_by(id="tenant-other").one()
+
+        assert tenant_demo.usage_count == 1
+        assert tenant_other.usage_count == 1
+
+# #901
+def test_same_idempotency_key_is_isolated_between_tenants(client):
+    ensure_setup(client)
+
+    shared_key = "shared-key-across-tenants"
+
+    demo_token = issue_token(client).json()["token"]
+    demo_response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": shared_key,
+        },
+        json={
+            "token": demo_token,
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.31",
+            "country_code": "EE",
+        },
+    )
+
+    assert demo_response.status_code == 200
+
+    client.post(
+        "/rights/create",
+        headers=OTHER_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-idempotency-isolation",
+            "owner_id": "user-777",
+            "valid": True,
+        },
+    )
+
+    other_token_response = client.post(
+        "/token/issue",
+        headers=OTHER_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-idempotency-isolation",
+            "user_id": "user-777",
+            "device_id": "gate-X1",
+            "scope": "access",
+        },
+    )
+
+    assert other_token_response.status_code == 200
+
+    other_response = client.post(
+        "/request/access",
+        headers={
+            **OTHER_HEADERS,
+            "Idempotency-Key": shared_key,
+        },
+        json={
+            "token": other_token_response.json()["token"],
+            "request_type": "access",
+            "device_id": "gate-X1",
+            "ip_address": "10.0.0.32",
+            "country_code": "EE",
+        },
+    )
+
+    assert other_response.status_code == 200
+
+    with SessionLocal() as db:
+        logs = (
+            db.query(RequestLog)
+            .filter(RequestLog.idempotency_key == shared_key)
+            .all()
+        )
+
+        assert len(logs) == 2
+        assert {log.tenant_id for log in logs} == {
+            "tenant-demo",
+            "tenant-other",
+        }
+
+# #902
+def test_tenant_usage_count_is_isolated_between_tenants(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        demo = db.query(Tenant).filter_by(id="tenant-demo").one()
+        other = db.query(Tenant).filter_by(id="tenant-other").one()
+
+        demo.monthly_quota = 10
+        other.monthly_quota = 10
+        demo.usage_count = 0
+        other.usage_count = 0
+        db.commit()
+
+    demo_token = issue_token(client).json()["token"]
+    demo_response = access_request(
+        client,
+        demo_token,
+        ip_address="10.0.0.41",
+    )
+    assert demo_response.status_code == 200
+
+    client.post(
+        "/rights/create",
+        headers=OTHER_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-usage-isolation",
+            "owner_id": "user-777",
+            "valid": True,
+        },
+    )
+
+    other_token_response = client.post(
+        "/token/issue",
+        headers=OTHER_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-usage-isolation",
+            "user_id": "user-777",
+            "device_id": "gate-X1",
+            "scope": "access",
+        },
+    )
+    assert other_token_response.status_code == 200
+
+    other_response = client.post(
+        "/request/access",
+        headers=OTHER_HEADERS,
+        json={
+            "token": other_token_response.json()["token"],
+            "request_type": "access",
+            "device_id": "gate-X1",
+            "ip_address": "10.0.0.42",
+            "country_code": "EE",
+        },
+    )
+    assert other_response.status_code == 200
+
+    with SessionLocal() as db:
+        demo = db.query(Tenant).filter_by(id="tenant-demo").one()
+        other = db.query(Tenant).filter_by(id="tenant-other").one()
+
+        assert demo.usage_count == 1
+        assert other.usage_count == 1
+
+# #903
+def test_idempotency_conflict_does_not_increment_usage_count(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "usage-idempotency-conflict",
+    }
+
+    first = client.post(
+        "/request/access",
+        headers=headers,
+        json={
+            "token": token,
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.51",
+            "country_code": "EE",
+        },
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        "/request/access",
+        headers=headers,
+        json={
+            "token": token,
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.52",
+            "country_code": "EE",
+        },
+    )
+    assert second.status_code == 409
+    assert second.json()["detail"] == "idempotency_key_conflict"
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        assert tenant.usage_count == 1
+
+
+# #904
+def test_invalid_token_does_not_increment_usage_count(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        db.commit()
+
+    response = client.post(
+        "/request/access",
+        headers=HEADERS,
+        json={
+            "token": "not-a-valid-token",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.53",
+            "country_code": "EE",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_token"
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        assert tenant.usage_count == 0
+
+
+# #905
+def test_device_mismatch_does_not_increment_usage_count(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        db.commit()
+
+    create_device = client.post(
+        "/admin/devices",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "device_id": "gate-A2",
+            "description": "Second demo gate",
+        },
+    )
+    assert create_device.status_code == 200
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        device_id="gate-A2",
+        ip_address="10.0.0.54",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "device_mismatch"
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        assert tenant.usage_count == 0
+
+
+# #906
+def test_scope_mismatch_does_not_increment_usage_count(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    response = access_request(
+        client,
+        token,
+        request_type="ownership_transfer",
+        ip_address="10.0.0.55",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "scope_mismatch"
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        assert tenant.usage_count == 0
+
+
+# #907
+def test_owner_mismatch_does_not_increment_usage_count(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+
+    with SessionLocal() as db:
+        right = (
+            db.query(AccessRight)
+            .filter_by(
+                tenant_id="tenant-demo",
+                right_id="right-001",
+            )
+            .one()
+        )
+        right.owner_id = "user-999"
+        right.version += 1
+        db.commit()
+
+    response = access_request(
+        client,
+        token,
+        ip_address="10.0.0.56",
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "owner_mismatch"
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        assert tenant.usage_count == 0
+
+# #913
+def test_idempotent_allowed_retry_emits_one_decision_event(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "outbox-allowed-retry",
+    }
+    payload = {
+        "token": token,
+        "request_type": "access",
+        "device_id": "gate-A1",
+        "ip_address": "10.0.0.61",
+        "country_code": "EE",
+    }
+
+    first = client.post("/request/access", headers=headers, json=payload)
+    second = client.post("/request/access", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    with SessionLocal() as db:
+        events = (
+            db.query(OutboxEvent)
+            .filter_by(
+                tenant_id="tenant-demo",
+                event_type="decision.allowed",
+            )
+            .all()
+        )
+        assert len(events) == 1
+
+
+# #914
+def test_idempotent_allowed_retry_emits_one_billing_event(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "outbox-billing-retry",
+    }
+    payload = {
+        "token": token,
+        "request_type": "access",
+        "device_id": "gate-A1",
+        "ip_address": "10.0.0.62",
+        "country_code": "EE",
+    }
+
+    first = client.post("/request/access", headers=headers, json=payload)
+    second = client.post("/request/access", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    with SessionLocal() as db:
+        events = (
+            db.query(OutboxEvent)
+            .filter_by(
+                tenant_id="tenant-demo",
+                event_type="billing.usage.incremented",
+            )
+            .all()
+        )
+        assert len(events) == 1
+
+
+# #915
+def test_idempotent_denied_retry_emits_one_decision_event(client):
+    ensure_setup(client)
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
+
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "outbox-denied-retry",
+    }
+    payload = {
+        "token": token,
+        "request_type": "ownership_transfer",
+        "device_id": "gate-A1",
+        "ip_address": "10.0.0.63",
+        "country_code": "EE",
+        "new_owner_id": "user-123",
+    }
+
+    first = client.post("/request/access", headers=headers, json=payload)
+    second = client.post("/request/access", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert first.json()["allow"] is False
+    assert second.status_code == 200
+
+    with SessionLocal() as db:
+        events = (
+            db.query(OutboxEvent)
+            .filter_by(
+                tenant_id="tenant-demo",
+                event_type="decision.denied",
+            )
+            .all()
+        )
+        assert len(events) == 1
+
+
+# #916
+def test_idempotent_denied_retry_emits_one_billing_event(client):
+    ensure_setup(client)
+
+    token = issue_token(
+        client,
+        scope="ownership_transfer",
+    ).json()["token"]
+
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "outbox-denied-billing-retry",
+    }
+    payload = {
+        "token": token,
+        "request_type": "ownership_transfer",
+        "device_id": "gate-A1",
+        "ip_address": "10.0.0.64",
+        "country_code": "EE",
+        "new_owner_id": "user-123",
+    }
+
+    first = client.post("/request/access", headers=headers, json=payload)
+    second = client.post("/request/access", headers=headers, json=payload)
+
+    assert first.status_code == 200
+    assert first.json()["allow"] is False
+    assert second.status_code == 200
+
+    with SessionLocal() as db:
+        events = (
+            db.query(OutboxEvent)
+            .filter_by(
+                tenant_id="tenant-demo",
+                event_type="billing.usage.incremented",
+            )
+            .all()
+        )
+        assert len(events) == 1
+
+
+# #917
+def test_idempotency_conflict_does_not_emit_second_decision_event(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "outbox-conflict-decision",
+    }
+
+    first = client.post(
+        "/request/access",
+        headers=headers,
+        json={
+            "token": token,
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.65",
+            "country_code": "EE",
+        },
+    )
+
+    second = client.post(
+        "/request/access",
+        headers=headers,
+        json={
+            "token": token,
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.66",
+            "country_code": "EE",
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+
+    with SessionLocal() as db:
+        events = (
+            db.query(OutboxEvent)
+            .filter_by(
+                tenant_id="tenant-demo",
+                event_type="decision.allowed",
+            )
+            .all()
+        )
+        assert len(events) == 1
+
+
+# #918
+def test_idempotency_conflict_does_not_emit_second_billing_event(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "outbox-conflict-billing",
+    }
+
+    first = client.post(
+        "/request/access",
+        headers=headers,
+        json={
+            "token": token,
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.67",
+            "country_code": "EE",
+        },
+    )
+
+    second = client.post(
+        "/request/access",
+        headers=headers,
+        json={
+            "token": token,
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.68",
+            "country_code": "EE",
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+
+    with SessionLocal() as db:
+        events = (
+            db.query(OutboxEvent)
+            .filter_by(
+                tenant_id="tenant-demo",
+                event_type="billing.usage.incremented",
+            )
+            .all()
+        )
+        assert len(events) == 1
+
+
+# #919
+def test_quota_rejection_emits_no_decision_event(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant.monthly_quota = 1
+        tenant.usage_count = 1
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+    response = access_request(
+        client,
+        token,
+        ip_address="10.0.0.69",
+    )
+
+    assert response.status_code == 429
+
+    with SessionLocal() as db:
+        events = (
+            db.query(OutboxEvent)
+            .filter(
+                OutboxEvent.tenant_id == "tenant-demo",
+                OutboxEvent.event_type.in_(
+                    ["decision.allowed", "decision.denied"]
+                ),
+            )
+            .all()
+        )
+        assert events == []
+
+
+# #920
+def test_quota_rejection_emits_no_billing_event(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.query(Tenant).filter_by(id="tenant-demo").one()
+        tenant.monthly_quota = 1
+        tenant.usage_count = 1
+        db.commit()
+
+    token = issue_token(client).json()["token"]
+    response = access_request(
+        client,
+        token,
+        ip_address="10.0.0.70",
+    )
+
+    assert response.status_code == 429
+
+    with SessionLocal() as db:
+        events = (
+            db.query(OutboxEvent)
+            .filter_by(
+                tenant_id="tenant-demo",
+                event_type="billing.usage.incremented",
+            )
+            .all()
+        )
+        assert events == []
+
+
+# #921
+def test_invalid_token_emits_no_access_side_effect_events(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/request/access",
+        headers=HEADERS,
+        json={
+            "token": "invalid-token",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.71",
+            "country_code": "EE",
+        },
+    )
+
+    assert response.status_code == 401
+
+    with SessionLocal() as db:
+        events = (
+            db.query(OutboxEvent)
+            .filter(
+                OutboxEvent.tenant_id == "tenant-demo",
+                OutboxEvent.event_type.in_(
+                    [
+                        "decision.allowed",
+                        "decision.denied",
+                        "billing.usage.incremented",
+                    ]
+                ),
+            )
+            .all()
+        )
+        assert events == []
+
+
+# #922
+def test_access_side_effect_events_are_tenant_isolated(client):
+    ensure_setup(client)
+
+    demo_token = issue_token(client).json()["token"]
+    demo_response = access_request(
+        client,
+        demo_token,
+        ip_address="10.0.0.72",
+    )
+    assert demo_response.status_code == 200
+
+    client.post(
+        "/rights/create",
+        headers=OTHER_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-outbox-isolation",
+            "owner_id": "user-777",
+            "valid": True,
+        },
+    )
+
+    other_token_response = client.post(
+        "/token/issue",
+        headers=OTHER_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-outbox-isolation",
+            "user_id": "user-777",
+            "device_id": "gate-X1",
+            "scope": "access",
+        },
+    )
+    assert other_token_response.status_code == 200
+
+    other_response = client.post(
+        "/request/access",
+        headers=OTHER_HEADERS,
+        json={
+            "token": other_token_response.json()["token"],
+            "request_type": "access",
+            "device_id": "gate-X1",
+            "ip_address": "10.0.0.73",
+            "country_code": "EE",
+        },
+    )
+    assert other_response.status_code == 200
+
+    with SessionLocal() as db:
+        demo_events = (
+            db.query(OutboxEvent)
+            .filter_by(tenant_id="tenant-demo")
+            .all()
+        )
+        other_events = (
+            db.query(OutboxEvent)
+            .filter_by(tenant_id="tenant-other")
+            .all()
+        )
+
+        assert len(demo_events) == 2
+        assert len(other_events) == 2
+
+        assert {event.event_type for event in demo_events} == {
+            "decision.allowed",
+            "billing.usage.incremented",
+        }
+        assert {event.event_type for event in other_events} == {
+            "decision.allowed",
+            "billing.usage.incremented",
+        }
