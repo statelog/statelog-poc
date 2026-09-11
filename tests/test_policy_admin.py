@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta
 from tests.test_smoke import ADMIN_HEADERS, ensure_setup, issue_token, access_request
 from app.database import SessionLocal
-from app.models import PolicyHistory
+from app.models import OutboxEvent, PolicyHistory, Tenant
 from app.main import (
     PolicyRecord,
     RequestLog,
@@ -17706,3 +17706,450 @@ def test_admin_audit_logs_trimmed_tenant_and_count_preserve_same_scope(client):
     trace_ids = {item["trace_id"] for item in logs.json()}
     assert trace_id in trace_ids
     assert count.json()["total"] == len(logs.json())
+
+# #923
+def test_replay_does_not_increment_tenant_usage_count(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    trace_id = access.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter(RequestLog.trace_id == trace_id)
+            .one()
+        )
+        log_id = log.id
+
+        tenant = db.get(Tenant, "tenant-demo")
+        usage_before = tenant.usage_count
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == usage_before
+
+
+# #924
+def test_replay_does_not_create_request_log(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    trace_id = access.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter(RequestLog.trace_id == trace_id)
+            .one()
+        )
+        log_id = log.id
+        count_before = db.query(RequestLog).count()
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    with SessionLocal() as db:
+        assert db.query(RequestLog).count() == count_before
+
+
+# #925
+def test_replay_does_not_create_outbox_events(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    trace_id = access.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter(RequestLog.trace_id == trace_id)
+            .one()
+        )
+        log_id = log.id
+        count_before = db.query(OutboxEvent).count()
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    with SessionLocal() as db:
+        assert db.query(OutboxEvent).count() == count_before
+
+
+# #926
+def test_repeated_replay_remains_side_effect_free(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    trace_id = access.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter(RequestLog.trace_id == trace_id)
+            .one()
+        )
+        log_id = log.id
+
+        tenant = db.get(Tenant, "tenant-demo")
+        usage_before = tenant.usage_count
+        log_count_before = db.query(RequestLog).count()
+        outbox_count_before = db.query(OutboxEvent).count()
+
+    first = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+    second = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+
+        assert tenant.usage_count == usage_before
+        assert db.query(RequestLog).count() == log_count_before
+        assert db.query(OutboxEvent).count() == outbox_count_before
+
+
+# #927
+def test_replay_does_not_mutate_original_request_log(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    access = access_request(client, token)
+    assert access.status_code == 200
+
+    trace_id = access.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter(RequestLog.trace_id == trace_id)
+            .one()
+        )
+        log_id = log.id
+
+        original = {
+            "allowed": log.allowed,
+            "risk_score": log.risk_score,
+            "reason": log.reason,
+            "risk_signals": log.risk_signals,
+            "policy_matched": log.policy_matched,
+            "policy_name": log.policy_name,
+            "policy_id": log.policy_id,
+            "policy_version": log.policy_version,
+            "workflow_version": log.workflow_version,
+            "decision_source": log.decision_source,
+            "decision_path": log.decision_path,
+            "request_fingerprint": log.request_fingerprint,
+            "idempotency_key": log.idempotency_key,
+        }
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 200
+
+    with SessionLocal() as db:
+        log = db.get(RequestLog, log_id)
+        assert log is not None
+
+        after = {
+            "allowed": log.allowed,
+            "risk_score": log.risk_score,
+            "reason": log.reason,
+            "risk_signals": log.risk_signals,
+            "policy_matched": log.policy_matched,
+            "policy_name": log.policy_name,
+            "policy_id": log.policy_id,
+            "policy_version": log.policy_version,
+            "workflow_version": log.workflow_version,
+            "decision_source": log.decision_source,
+            "decision_path": log.decision_path,
+            "request_fingerprint": log.request_fingerprint,
+            "idempotency_key": log.idempotency_key,
+        }
+
+        assert after == original
+
+# #928
+def test_missing_log_replay_is_side_effect_free(client):
+    ensure_setup(client)
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        usage_before = tenant.usage_count
+        logs_before = db.query(RequestLog).count()
+        outbox_before = db.query(OutboxEvent).count()
+
+    replay = client.get(
+        "/admin/audit/logs/999999/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 404
+    assert replay.json()["detail"] == "request_log_not_found"
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == usage_before
+        assert db.query(RequestLog).count() == logs_before
+        assert db.query(OutboxEvent).count() == outbox_before
+
+
+# #929
+def test_missing_historical_workflow_replay_is_side_effect_free(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        log.workflow_version = 999
+        db.commit()
+        log_id = log.id
+
+        tenant = db.get(Tenant, "tenant-demo")
+        usage_before = tenant.usage_count
+        logs_before = db.query(RequestLog).count()
+        outbox_before = db.query(OutboxEvent).count()
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 409
+    assert replay.json()["detail"] == "historical_workflow_version_not_found"
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == usage_before
+        assert db.query(RequestLog).count() == logs_before
+        assert db.query(OutboxEvent).count() == outbox_before
+
+
+# #930
+def test_missing_historical_policy_replay_is_side_effect_free(client):
+    ensure_setup(client)
+
+    policy = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "side-effect-missing-history-policy",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+        },
+    )
+    assert policy.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+    assert original.json()["allow"] is False
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        assert log.policy_id is not None
+        assert log.policy_version is not None
+
+        log.workflow_version = None
+        log.policy_version = 999
+        db.commit()
+        log_id = log.id
+
+        tenant = db.get(Tenant, "tenant-demo")
+        usage_before = tenant.usage_count
+        logs_before = db.query(RequestLog).count()
+        outbox_before = db.query(OutboxEvent).count()
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 409
+    assert replay.json()["detail"] == "historical_policy_version_not_found"
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == usage_before
+        assert db.query(RequestLog).count() == logs_before
+        assert db.query(OutboxEvent).count() == outbox_before
+
+
+# #931
+def test_incomplete_historical_policy_reference_replay_is_side_effect_free(client):
+    ensure_setup(client)
+
+    policy = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "side-effect-incomplete-reference-policy",
+            "effect": "deny",
+            "priority": 1,
+            "request_types": ["access"],
+            "countries": ["EE"],
+            "device_ids": ["gate-A1"],
+            "enabled": True,
+        },
+    )
+    assert policy.status_code == 200
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+    assert original.json()["allow"] is False
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        assert log.policy_id is not None
+
+        log.workflow_version = None
+        log.policy_version = None
+        db.commit()
+        log_id = log.id
+
+        tenant = db.get(Tenant, "tenant-demo")
+        usage_before = tenant.usage_count
+        logs_before = db.query(RequestLog).count()
+        outbox_before = db.query(OutboxEvent).count()
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 409
+    assert replay.json()["detail"] == "historical_policy_reference_incomplete"
+
+    with SessionLocal() as db:
+        tenant = db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == usage_before
+        assert db.query(RequestLog).count() == logs_before
+        assert db.query(OutboxEvent).count() == outbox_before
+
+
+# #932
+def test_failed_replay_does_not_mutate_original_request_log(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    original = access_request(client, token)
+    assert original.status_code == 200
+
+    trace_id = original.json()["trace_id"]
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter_by(trace_id=trace_id)
+            .one()
+        )
+        log.workflow_version = 999
+        db.commit()
+        log_id = log.id
+
+        expected = {
+            "tenant_id": log.tenant_id,
+            "trace_id": log.trace_id,
+            "allowed": log.allowed,
+            "risk_score": log.risk_score,
+            "reason": log.reason,
+            "risk_signals": log.risk_signals,
+            "policy_id": log.policy_id,
+            "policy_version": log.policy_version,
+            "workflow_version": log.workflow_version,
+            "decision_source": log.decision_source,
+            "decision_path": log.decision_path,
+        }
+
+    replay = client.get(
+        f"/admin/audit/logs/{log_id}/replay",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert replay.status_code == 409
+    assert replay.json()["detail"] == "historical_workflow_version_not_found"
+
+    with SessionLocal() as db:
+        log = db.get(RequestLog, log_id)
+        assert log is not None
+
+        actual = {
+            "tenant_id": log.tenant_id,
+            "trace_id": log.trace_id,
+            "allowed": log.allowed,
+            "risk_score": log.risk_score,
+            "reason": log.reason,
+            "risk_signals": log.risk_signals,
+            "policy_id": log.policy_id,
+            "policy_version": log.policy_version,
+            "workflow_version": log.workflow_version,
+            "decision_source": log.decision_source,
+            "decision_path": log.decision_path,
+        }
+
+        assert actual == expected
