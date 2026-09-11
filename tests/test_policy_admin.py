@@ -18456,12 +18456,14 @@ def test_policy_update_commit_failure_rolls_back_current_policy(client):
 
     client.app.dependency_overrides[get_db] = failing_db
     try:
-        with pytest.raises(SQLAlchemyError):
-            client.patch(
-                f"/admin/policies/{policy_id}",
-                headers=ADMIN_HEADERS,
-                json={"priority": 99},
-            )
+        response = client.patch(
+            f"/admin/policies/{policy_id}",
+            headers=ADMIN_HEADERS,
+            json={"priority": 99},
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == "persistence_unavailable"
     finally:
         client.app.dependency_overrides.pop(get_db, None)
 
@@ -18514,12 +18516,14 @@ def test_policy_update_commit_failure_rolls_back_history(client):
 
     client.app.dependency_overrides[get_db] = failing_db
     try:
-        with pytest.raises(SQLAlchemyError):
-            client.patch(
-                f"/admin/policies/{policy_id}",
-                headers=ADMIN_HEADERS,
-                json={"priority": 77},
-            )
+        response = client.patch(
+            f"/admin/policies/{policy_id}",
+            headers=ADMIN_HEADERS,
+            json={"priority": 77},
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == "persistence_unavailable"
     finally:
         client.app.dependency_overrides.pop(get_db, None)
 
@@ -18575,11 +18579,13 @@ def test_policy_delete_commit_failure_restores_policy_and_history(client):
 
     client.app.dependency_overrides[get_db] = failing_db
     try:
-        with pytest.raises(SQLAlchemyError):
-            client.delete(
-                f"/admin/policies/{policy_id}",
-                headers=ADMIN_HEADERS,
-            )
+        response = client.delete(
+            f"/admin/policies/{policy_id}",
+            headers=ADMIN_HEADERS,
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == "persistence_unavailable"
     finally:
         client.app.dependency_overrides.pop(get_db, None)
 
@@ -18639,20 +18645,21 @@ def test_workflow_update_commit_failure_rolls_back_current_config(client):
 
     client.app.dependency_overrides[get_db] = failing_db
     try:
-        with pytest.raises(SQLAlchemyError):
-            client.put(
-                "/admin/workflow-config",
-                headers=ADMIN_HEADERS,
-                json={
-                    "tenant_id": "tenant-demo",
-                    "include_risk_step": False,
-                    "include_policy_step": False,
-                    "execution_mode": "policy_first",
-                },
-            )
+        response = client.put(
+            "/admin/workflow-config",
+            headers=ADMIN_HEADERS,
+            json={
+                "tenant_id": "tenant-demo",
+                "include_risk_step": False,
+                "include_policy_step": False,
+                "execution_mode": "policy_first",
+            },
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == "persistence_unavailable"
     finally:
         client.app.dependency_overrides.pop(get_db, None)
-
     with SessionLocal() as db:
         record = db.get(WorkflowConfigRecord, "tenant-demo")
         assert record is not None
@@ -18706,17 +18713,19 @@ def test_workflow_update_commit_failure_rolls_back_history(client):
 
     client.app.dependency_overrides[get_db] = failing_db
     try:
-        with pytest.raises(SQLAlchemyError):
-            client.put(
-                "/admin/workflow-config",
-                headers=ADMIN_HEADERS,
-                json={
-                    "tenant_id": "tenant-demo",
-                    "include_risk_step": False,
-                    "include_policy_step": True,
-                    "execution_mode": "policy_first",
-                },
-            )
+        response = client.put(
+            "/admin/workflow-config",
+            headers=ADMIN_HEADERS,
+            json={
+                "tenant_id": "tenant-demo",
+                "include_risk_step": False,
+                "include_policy_step": True,
+                "execution_mode": "policy_first",
+            },
+        )
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == "persistence_unavailable"
     finally:
         client.app.dependency_overrides.pop(get_db, None)
 
@@ -19009,3 +19018,179 @@ def test_stale_workflow_update_does_not_mutate_state_or_history(client):
 
     assert after == before
     assert history_after == history_before
+
+def test_policy_update_rejects_zero_expected_version(client):
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "zero-expected-version-policy",
+            "effect": "allow",
+            "priority": 48,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    response = client.patch(
+        f"/admin/policies/{policy_id}",
+        headers=ADMIN_HEADERS,
+        json={
+            "expected_version": 0,
+            "priority": 49,
+        },
+    )
+
+    assert response.status_code == 422
+
+    with SessionLocal() as db:
+        policy = db.get(PolicyRecord, policy_id)
+        assert policy is not None
+        assert policy.priority == 48
+        assert policy.version == 1
+
+
+def test_workflow_update_rejects_zero_expected_version(client):
+    ensure_setup(client)
+
+    initial = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert initial.status_code == 200
+    version = initial.json()["version"]
+
+    response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": False,
+            "include_policy_step": False,
+            "execution_mode": "policy_first",
+            "expected_version": 0,
+        },
+    )
+
+    assert response.status_code == 422
+
+    with SessionLocal() as db:
+        record = db.get(WorkflowConfigRecord, "tenant-demo")
+        assert record is not None
+        assert record.version == version
+        assert record.include_risk_step is True
+        assert record.include_policy_step is True
+        assert record.execution_mode == "risk_first"
+
+def test_workflow_create_rejects_expected_version_when_config_missing(client):
+    ensure_setup(client)
+    tenant_id = "tenant-other"
+
+    with SessionLocal() as db:
+        existing = db.get(WorkflowConfigRecord, tenant_id)
+        if existing is not None:
+            db.delete(existing)
+
+        db.query(WorkflowConfigHistory).filter(
+            WorkflowConfigHistory.tenant_id == tenant_id
+        ).delete()
+        db.commit()
+
+    response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": tenant_id,
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+            "expected_version": 1,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "workflow_version_conflict"
+
+    with SessionLocal() as db:
+        assert db.get(WorkflowConfigRecord, tenant_id) is None
+
+
+def test_failed_workflow_create_version_check_creates_no_history(client):
+    ensure_setup(client)
+    tenant_id = "tenant-other"
+
+    with SessionLocal() as db:
+        existing = db.get(WorkflowConfigRecord, tenant_id)
+        if existing is not None:
+            db.delete(existing)
+
+        db.query(WorkflowConfigHistory).filter(
+            WorkflowConfigHistory.tenant_id == tenant_id
+        ).delete()
+        db.commit()
+
+    response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": tenant_id,
+            "include_risk_step": False,
+            "include_policy_step": False,
+            "execution_mode": "policy_first",
+            "expected_version": 99,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "workflow_version_conflict"
+
+    with SessionLocal() as db:
+        assert (
+            db.query(WorkflowConfigHistory)
+            .filter(WorkflowConfigHistory.tenant_id == tenant_id)
+            .count()
+            == 0
+        )
+
+
+def test_workflow_create_without_expected_version_still_succeeds(client):
+    ensure_setup(client)
+    tenant_id = "tenant-other"
+
+    with SessionLocal() as db:
+        existing = db.get(WorkflowConfigRecord, tenant_id)
+        if existing is not None:
+            db.delete(existing)
+
+        db.query(WorkflowConfigHistory).filter(
+            WorkflowConfigHistory.tenant_id == tenant_id
+        ).delete()
+        db.commit()
+
+    response = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": tenant_id,
+            "include_risk_step": True,
+            "include_policy_step": False,
+            "execution_mode": "risk_first",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["version"] == 1
+    assert response.json()["tenant_id"] == tenant_id

@@ -525,15 +525,14 @@ def update_workflow_config(
         raise HTTPException(status_code=404, detail="tenant_not_found")
 
     record = db.get(WorkflowConfigRecord, payload.tenant_id)
-    if (
-        record is not None
-        and payload.expected_version is not None
-        and record.version != payload.expected_version
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="workflow_version_conflict",
-        )
+
+    if payload.expected_version is not None:
+        if record is None or record.version != payload.expected_version:
+            raise HTTPException(
+                status_code=409,
+                detail="workflow_version_conflict",
+            )
+
     if record is None:
         record = WorkflowConfigRecord(
             tenant_id=payload.tenant_id,
@@ -550,7 +549,7 @@ def update_workflow_config(
         record.execution_mode = payload.execution_mode
         record.version += 1
 
-    db.commit()
+    commit_or_409(db, detail="policy_update_conflict")
     db.refresh(record)
 
     return {
@@ -750,7 +749,7 @@ def update_policy(
 
     policy.version += 1
 
-    db.commit()
+    commit_or_409(db, detail="policy_delete_conflict")
     db.refresh(policy)
 
     return {
@@ -845,7 +844,7 @@ def delete_policy(
 
     save_policy_history(db, policy)  
     db.delete(policy)
-    db.commit()
+    commit_or_409(db, detail="workflow_config_conflict")
 
     return {
         "deleted": True,
