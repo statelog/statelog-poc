@@ -1538,3 +1538,427 @@ def test_outbox_claim_cannot_take_delivered_event():
         assert event.delivered is True
         assert event.claimed_by is None
         assert event.claim_expires_at is None
+
+# #766
+def test_outbox_delivery_id_is_stable_across_retry(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    delivery_ids = []
+    responses = iter([500, 200])
+
+    def fake_post(url, **kwargs):
+        delivery_ids.append(
+            kwargs["headers"][settings.webhook_delivery_id_header]
+        )
+        return _OutboxResponse(next(responses))
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-766",
+            target_url="https://example.com/766",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-766",
+        )
+        event_id = event.id
+
+    with SessionLocal() as db:
+        first_count = deliver_pending_events(db)
+
+    assert first_count == 0
+
+    with SessionLocal() as db:
+        event = db.get(OutboxEvent, event_id)
+        event.next_attempt_at = utcnow_naive() - timedelta(seconds=1)
+        db.commit()
+
+    with SessionLocal() as db:
+        second_count = deliver_pending_events(db)
+
+    assert second_count == 1
+    assert len(delivery_ids) == 2
+    assert delivery_ids[0] == delivery_ids[1]
+
+
+# #767
+def test_outbox_delivery_id_does_not_include_attempt_number(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured["delivery_id"] = (
+            kwargs["headers"][settings.webhook_delivery_id_header]
+        )
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        sub = _make_outbox_subscription(
+            db,
+            tenant_id="outbox-767",
+            target_url="https://example.com/767",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-767",
+        )
+        event.attempts = 4
+        db.commit()
+        event_id = event.id
+        sub_id = sub.id
+
+    with SessionLocal() as db:
+        deliver_pending_events(db)
+
+    assert captured["delivery_id"] == f"evt-{event_id}-sub-{sub_id}"
+    assert "try-" not in captured["delivery_id"]
+
+
+# #768
+def test_outbox_different_subscriptions_get_different_delivery_ids(
+    monkeypatch,
+):
+    _patch_outbox_secret(monkeypatch)
+    delivery_ids = []
+
+    def fake_post(url, **kwargs):
+        delivery_ids.append(
+            kwargs["headers"][settings.webhook_delivery_id_header]
+        )
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-768",
+            target_url="https://example.com/768-a",
+        )
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-768",
+            target_url="https://example.com/768-b",
+        )
+        _make_outbox_event(
+            db,
+            tenant_id="outbox-768",
+        )
+
+    with SessionLocal() as db:
+        deliver_pending_events(db)
+
+    assert len(delivery_ids) == 2
+    assert len(set(delivery_ids)) == 2
+
+
+# #769
+def test_outbox_different_events_get_different_delivery_ids(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    delivery_ids = []
+
+    def fake_post(url, **kwargs):
+        delivery_ids.append(
+            kwargs["headers"][settings.webhook_delivery_id_header]
+        )
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-769",
+            target_url="https://example.com/769",
+        )
+        _make_outbox_event(
+            db,
+            tenant_id="outbox-769",
+        )
+        _make_outbox_event(
+            db,
+            tenant_id="outbox-769",
+        )
+
+    with SessionLocal() as db:
+        count = deliver_pending_events(db)
+
+    assert count == 2
+    assert len(delivery_ids) == 2
+    assert len(set(delivery_ids)) == 2
+
+
+# #770
+def test_outbox_delivery_id_matches_event_and_subscription(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured["delivery_id"] = (
+            kwargs["headers"][settings.webhook_delivery_id_header]
+        )
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        sub = _make_outbox_subscription(
+            db,
+            tenant_id="outbox-770",
+            target_url="https://example.com/770",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-770",
+        )
+        event_id = event.id
+        sub_id = sub.id
+
+    with SessionLocal() as db:
+        deliver_pending_events(db)
+
+    assert captured["delivery_id"] == f"evt-{event_id}-sub-{sub_id}"
+
+
+# #771
+def test_outbox_retry_increments_attempt_but_keeps_delivery_id(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    delivery_ids = []
+
+    def fake_post(url, **kwargs):
+        delivery_ids.append(
+            kwargs["headers"][settings.webhook_delivery_id_header]
+        )
+        return _OutboxResponse(500)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-771",
+            target_url="https://example.com/771",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-771",
+        )
+        event_id = event.id
+
+    with SessionLocal() as db:
+        deliver_pending_events(db)
+
+    with SessionLocal() as db:
+        event = db.get(OutboxEvent, event_id)
+        assert event.attempts == 1
+        event.next_attempt_at = utcnow_naive() - timedelta(seconds=1)
+        db.commit()
+
+    with SessionLocal() as db:
+        deliver_pending_events(db)
+
+    with SessionLocal() as db:
+        event = db.get(OutboxEvent, event_id)
+        assert event.attempts == 2
+
+    assert len(delivery_ids) == 2
+    assert delivery_ids[0] == delivery_ids[1]
+
+
+# #772
+def test_outbox_successful_subscription_is_not_redelivered(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        sub = _make_outbox_subscription(
+            db,
+            tenant_id="outbox-772",
+            target_url="https://example.com/772",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-772",
+        )
+
+        _record_attempt(
+            db,
+            event_id=event.id,
+            subscription_id=sub.id,
+            attempt_number=1,
+            successful=True,
+            response_status_code=200,
+            error_message=None,
+        )
+        db.commit()
+
+    with SessionLocal() as db:
+        count = deliver_pending_events(db)
+
+    assert count == 1
+    assert calls == []
+
+
+# #773
+def test_outbox_delivery_id_is_stable_after_expired_claim(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured["delivery_id"] = (
+            kwargs["headers"][settings.webhook_delivery_id_header]
+        )
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        sub = _make_outbox_subscription(
+            db,
+            tenant_id="outbox-773",
+            target_url="https://example.com/773",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-773",
+        )
+        event.claimed_by = "expired-worker"
+        event.claim_expires_at = utcnow_naive() - timedelta(seconds=1)
+        db.commit()
+        event_id = event.id
+        sub_id = sub.id
+
+    with SessionLocal() as db:
+        deliver_pending_events(db)
+
+    assert captured["delivery_id"] == f"evt-{event_id}-sub-{sub_id}"
+
+
+# #774
+def test_outbox_delivery_id_header_value_is_string(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured["delivery_id"] = (
+            kwargs["headers"][settings.webhook_delivery_id_header]
+        )
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-774",
+            target_url="https://example.com/774",
+        )
+        _make_outbox_event(
+            db,
+            tenant_id="outbox-774",
+        )
+
+    with SessionLocal() as db:
+        deliver_pending_events(db)
+
+    assert isinstance(captured["delivery_id"], str)
+    assert captured["delivery_id"]
+
+
+# #775
+def test_outbox_two_subscriptions_keep_stable_ids_across_retry(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+    first_ids = {}
+    second_ids = {}
+    phase = {"value": 1}
+
+    def fake_post(url, **kwargs):
+        delivery_id = kwargs["headers"][
+            settings.webhook_delivery_id_header
+        ]
+
+        if phase["value"] == 1:
+            first_ids[url] = delivery_id
+            return _OutboxResponse(500)
+
+        second_ids[url] = delivery_id
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-775",
+            target_url="https://example.com/775-a",
+        )
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-775",
+            target_url="https://example.com/775-b",
+        )
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-775",
+        )
+        event_id = event.id
+
+    with SessionLocal() as db:
+        first_count = deliver_pending_events(db)
+
+    assert first_count == 0
+
+    with SessionLocal() as db:
+        event = db.get(OutboxEvent, event_id)
+        event.next_attempt_at = utcnow_naive() - timedelta(seconds=1)
+        db.commit()
+
+    phase["value"] = 2
+
+    with SessionLocal() as db:
+        second_count = deliver_pending_events(db)
+
+    assert second_count == 1
+    assert first_ids == second_ids
+    assert len(first_ids) == 2
+    assert len(set(first_ids.values())) == 2

@@ -166,9 +166,7 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
                 continue
 
             timestamp = int(time.time())
-            delivery_id = (
-                f"evt-{event.id}-sub-{sub.id}-try-{event.attempts}"
-            )
+            delivery_id = f"evt-{event.id}-sub-{sub.id}"
 
             try:
                 secret = decrypt_secret(sub.signing_secret_encrypted)
