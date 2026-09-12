@@ -549,7 +549,7 @@ def update_workflow_config(
         record.execution_mode = payload.execution_mode
         record.version += 1
 
-    commit_or_409(db, detail="policy_update_conflict")
+    commit_or_409(db, detail="workflow_config_conflict")
     db.refresh(record)
 
     return {
@@ -834,6 +834,7 @@ def list_policies(
 @app.delete("/admin/policies/{policy_id}")
 def delete_policy(
     policy_id: int,
+    expected_version: int | None = Query(default=None, ge=1),
     _: str = Depends(get_admin),
     db: Session = Depends(get_db),
 ):
@@ -841,11 +842,16 @@ def delete_policy(
 
     if not policy:
         raise HTTPException(status_code=404, detail="policy_not_found")
+    
+    if expected_version is not None and policy.version != expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="policy_version_conflict",
+        )
 
     save_policy_history(db, policy)  
     db.delete(policy)
-    commit_or_409(db, detail="workflow_config_conflict")
-
+    commit_or_409(db, detail="policy_delete_conflict")
     return {
         "deleted": True,
         "policy_id": policy_id,

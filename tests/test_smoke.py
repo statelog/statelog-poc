@@ -450,6 +450,31 @@ def test_commit_or_409_returns_503_on_database_write_failure():
     assert exc_info.value.detail == "persistence_unavailable"
     assert session.rolled_back is True
 
+def test_commit_or_409_returns_409_on_integrity_conflict():
+    from sqlalchemy.exc import IntegrityError
+
+    class BrokenSession:
+        def __init__(self):
+            self.rolled_back = False
+
+        def commit(self):
+            raise IntegrityError(
+                "forced statement",
+                {},
+                Exception("forced_integrity_conflict"),
+            )
+
+        def rollback(self):
+            self.rolled_back = True
+
+    session = BrokenSession()
+
+    with pytest.raises(HTTPException) as exc_info:
+        commit_or_409(session, detail="workflow_config_conflict")
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "workflow_config_conflict"
+    assert session.rolled_back is True
 
 def test_webhook_delivery_commit_failure_bubbles_for_supervisor_visibility(client, monkeypatch):
     ensure_setup(client)

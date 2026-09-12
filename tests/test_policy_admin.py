@@ -7099,7 +7099,7 @@ def test_delete_policy_rejects_invalid_admin_api_key(client):
     ensure_setup(client)
 
     created = client.post(
-        "/admin/policies",
+        "/admin/policies/",
         headers=ADMIN_HEADERS,
         json={
             "tenant_id": "tenant-demo",
@@ -7122,6 +7122,112 @@ def test_delete_policy_rejects_invalid_admin_api_key(client):
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_admin"
 
+def test_delete_policy_with_matching_expected_version_succeeds(client):
+    ensure_setup(client)
+
+    create_response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "delete-version-match",
+            "effect": "allow",
+        },
+    )
+    assert create_response.status_code == 200
+    policy = create_response.json()
+
+    response = client.delete(
+        f"/admin/policies/{policy['id']}?expected_version={policy['version']}",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "deleted": True,
+        "policy_id": policy["id"],
+    }
+
+
+def test_delete_policy_with_stale_expected_version_returns_409_and_preserves_policy(client):
+    ensure_setup(client) 
+
+    create_response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "delete-version-stale",
+            "effect": "allow",
+        },
+    )
+    assert create_response.status_code == 200
+    policy = create_response.json()
+
+    update_response = client.patch(
+        f"/admin/policies/{policy['id']}",
+        headers=ADMIN_HEADERS,
+        json={
+            "effect": "deny",
+            "expected_version": policy["version"],
+        },
+    )
+    assert update_response.status_code == 200
+
+    response = client.delete(
+        f"/admin/policies/{policy['id']}?expected_version={policy['version']}",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "policy_version_conflict"
+
+    list_response = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert list_response.status_code == 200
+
+    preserved = next(
+        item
+        for item in list_response.json()
+        if item["id"] == policy["id"]
+    )
+    assert preserved["effect"] == "deny"
+
+def test_delete_policy_rejects_zero_expected_version(client):
+    ensure_setup(client)
+
+    create_response = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "delete-version-zero",
+            "effect": "allow",
+        },
+    )
+    assert create_response.status_code == 200
+    policy = create_response.json()
+
+    response = client.delete(
+        f"/admin/policies/{policy['id']}?expected_version=0",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+    list_response = client.get(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        params={"tenant_id": "tenant-demo"},
+    )
+    assert list_response.status_code == 200
+    assert any(
+        item["id"] == policy["id"]
+        for item in list_response.json()
+    )
 
 def test_delete_missing_policy_requires_admin_before_lookup(client):
     ensure_setup(client)
