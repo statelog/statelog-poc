@@ -2022,3 +2022,69 @@ def test_negative_content_length_is_rejected(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "invalid_content_length"
+
+def test_atomic_quota_reservation_rejects_stale_session(client):
+    ensure_setup(client)
+
+    from app.main import reserve_tenant_quota
+
+    with SessionLocal() as setup_db:
+        tenant = setup_db.get(Tenant, "tenant-demo")
+        tenant.monthly_quota = 1
+        tenant.usage_count = 0
+        setup_db.commit()
+
+    db_a = SessionLocal()
+    db_b = SessionLocal()
+
+    try:
+        tenant_a = db_a.get(Tenant, "tenant-demo")
+        tenant_b = db_b.get(Tenant, "tenant-demo")
+
+        assert tenant_a.usage_count == 0
+        assert tenant_b.usage_count == 0
+
+        usage_count = reserve_tenant_quota(db_a, "tenant-demo")
+        assert usage_count == 1
+        db_a.commit()
+
+        # db_b still has a stale ORM snapshot showing usage_count == 0.
+        assert tenant_b.usage_count == 0
+
+        with pytest.raises(HTTPException) as exc_info:
+            reserve_tenant_quota(db_b, "tenant-demo")
+
+        assert exc_info.value.status_code == 429
+        assert exc_info.value.detail == "tenant_quota_exceeded"
+
+        db_b.rollback()
+
+    finally:
+        db_a.close()
+        db_b.close()
+
+    with SessionLocal() as verify_db:
+        tenant = verify_db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 1
+
+def test_atomic_quota_reservation_rolls_back_with_transaction(client):
+    ensure_setup(client)
+
+    from app.main import reserve_tenant_quota
+
+    with SessionLocal() as setup_db:
+        tenant = setup_db.get(Tenant, "tenant-demo")
+        tenant.monthly_quota = 10
+        tenant.usage_count = 0
+        setup_db.commit()
+
+    with SessionLocal() as db:
+        usage_count = reserve_tenant_quota(db, "tenant-demo")
+
+        assert usage_count == 1
+
+        db.rollback()
+
+    with SessionLocal() as verify_db:
+        tenant = verify_db.get(Tenant, "tenant-demo")
+        assert tenant.usage_count == 0

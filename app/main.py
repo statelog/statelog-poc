@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from redis import Redis
 from redis.exceptions import RedisError
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm.exc import StaleDataError
 from sqlalchemy.orm import Session
@@ -410,6 +410,36 @@ def enforce_tenant_quota(tenant: Tenant) -> None:
     if tenant.usage_count >= tenant.monthly_quota:
         raise HTTPException(status_code=429, detail="tenant_quota_exceeded")
 
+def reserve_tenant_quota(db: Session, tenant_id: str) -> int:
+    result = db.execute(
+        update(Tenant)
+        .where(
+            Tenant.id == tenant_id,
+            Tenant.usage_count < Tenant.monthly_quota,
+        )
+        .values(
+            usage_count=Tenant.usage_count + 1,
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+    if result.rowcount != 1:
+        raise HTTPException(
+            status_code=429,
+            detail="tenant_quota_exceeded",
+        )
+
+    usage_count = db.scalar(
+        select(Tenant.usage_count).where(Tenant.id == tenant_id)
+    )
+
+    if usage_count is None:
+        raise HTTPException(
+            status_code=404,
+            detail="tenant_not_found",
+        )
+
+    return usage_count
 
 def emit_event(db: Session, tenant_id: str, event_type: str, payload: dict) -> None:
     db.add(OutboxEvent(tenant_id=tenant_id, event_type=event_type, payload=json.dumps(payload), delivered=False))
@@ -1403,7 +1433,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         decision_source=workflow_decision.decision_source,
         decision_path=json.dumps(list(workflow_decision.decision_path)),
     )
-    tenant.usage_count += 1
+    usage_count = reserve_tenant_quota(db, tenant.id)
     db.add(log)
 
 
@@ -1425,7 +1455,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         "billing.usage.incremented",
         {
             "tenant_id": tenant.id,
-            "usage_count": tenant.usage_count,
+            "usage_count": usage_count,
         },
     )
 
