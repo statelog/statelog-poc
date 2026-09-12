@@ -13,6 +13,7 @@ from app.outbox_worker import (
     _already_delivered,
     _claim_outbox_event,
     _record_attempt,
+    _release_outbox_claim,
     backoff_seconds,
     deliver_pending_events,
 )
@@ -2099,3 +2100,36 @@ def test_outbox_final_commit_failure_releases_claim(monkeypatch):
         assert event.delivered is False
         assert event.claimed_by is None
         assert event.claim_expires_at is None
+
+# #896
+def test_outbox_release_claim_cannot_release_another_workers_claim():
+    with SessionLocal() as db:
+        event = _make_outbox_event(
+            db,
+            tenant_id="outbox-896",
+        )
+        event_id = event.id
+
+        claim_token = _claim_outbox_event(
+            db,
+            event_id=event_id,
+            now=utcnow_naive(),
+            lease_seconds=60,
+        )
+
+        assert claim_token is not None
+
+        released = _release_outbox_claim(
+            db,
+            event_id=event_id,
+            claim_token="different-worker-token",
+        )
+
+        assert released is False
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+
+        assert event is not None
+        assert event.claimed_by == claim_token
+        assert event.claim_expires_at is not None
