@@ -1634,3 +1634,71 @@ def test_access_side_effect_events_are_tenant_isolated(client):
             "decision.allowed",
             "billing.usage.incremented",
         }
+
+# #897
+def test_create_right_rejects_other_tenant(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/rights/create",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "cross-tenant-right",
+            "owner_id": "user-777",
+            "valid": True,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "tenant_mismatch"
+
+
+# #898
+def test_revoke_right_rejects_other_tenant(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/rights/revoke",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-777",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "tenant_mismatch"
+
+
+# #899
+def test_token_issue_rejects_other_tenant(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/token/issue",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-777",
+            "user_id": "user-777",
+            "device_id": "gate-X1",
+            "scope": "access",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "tenant_mismatch"
+
+
+# #900
+def test_tenant_dashboard_rejects_other_tenant(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/tenant/tenant-other",
+        headers=HEADERS,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "tenant_mismatch"
