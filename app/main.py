@@ -313,11 +313,30 @@ async def limit_request_body_size(request: Request, call_next):
                 content={"detail": "invalid_content_length"},
             )
 
+        if body_size < 0:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": "invalid_content_length"},
+            )
+
         if body_size > MAX_REQUEST_BODY_BYTES:
             return JSONResponse(
                 status_code=413,
                 content={"detail": "request_too_large"},
             )
+
+    body = bytearray()
+
+    async for chunk in request.stream():
+        body.extend(chunk)
+
+        if len(body) > MAX_REQUEST_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "request_too_large"},
+            )
+
+    request._body = bytes(body)
 
     return await call_next(request)
 

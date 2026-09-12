@@ -1944,3 +1944,81 @@ def test_client_rate_limit_cannot_be_bypassed_with_different_ip(client):
         assert second.json()["detail"] == "rate_limited"
     finally:
         settings.rate_limit_per_minute = old_limit
+
+def test_large_streamed_request_without_content_length_is_rejected(client):
+    ensure_setup(client)
+
+    body = (
+        '{"tenant_id":"tenant-demo",'
+        '"right_id":"right-001",'
+        '"user_id":"user-123",'
+        '"device_id":"gate-A1",'
+        '"scope":"access",'
+        '"padding":"'
+        + ("x" * (1024 * 1024))
+        + '"}'
+    ).encode()
+
+    response = client.post(
+        "/token/issue",
+        headers={
+            **HEADERS,
+            "Content-Type": "application/json",
+        },
+        content=iter([body]),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "request_too_large"
+
+def test_small_streamed_request_without_content_length_is_allowed(client):
+    ensure_setup(client)
+
+    body = (
+        '{"tenant_id":"tenant-demo",'
+        '"right_id":"right-001",'
+        '"user_id":"user-123",'
+        '"device_id":"gate-A1",'
+        '"scope":"access"}'
+    ).encode()
+
+    response = client.post(
+        "/token/issue",
+        headers={
+            **HEADERS,
+            "Content-Type": "application/json",
+        },
+        content=iter([body]),
+    )
+
+    assert response.status_code == 200
+
+
+def test_oversized_content_length_is_rejected_before_endpoint(client):
+    response = client.post(
+        "/token/issue",
+        headers={
+            **HEADERS,
+            "Content-Type": "application/json",
+            "Content-Length": str((1024 * 1024) + 1),
+        },
+        content=b"{}",
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "request_too_large"
+
+
+def test_negative_content_length_is_rejected(client):
+    response = client.post(
+        "/token/issue",
+        headers={
+            **HEADERS,
+            "Content-Type": "application/json",
+            "Content-Length": "-1",
+        },
+        content=b"{}",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_content_length"
