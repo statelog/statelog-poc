@@ -1702,3 +1702,164 @@ def test_tenant_dashboard_rejects_other_tenant(client):
 
     assert response.status_code == 403
     assert response.json()["detail"] == "tenant_mismatch"
+
+# #901
+def test_client_auth_rejects_missing_tenant_header(client):
+    ensure_setup(client)
+
+    headers = {
+        "X-Client-Id": "gateway-1",
+        "X-API-Key": "super-secret",
+    }
+
+    response = client.post(
+        "/token/issue",
+        headers=headers,
+        json={
+            "tenant_id": "tenant-demo",
+            "right_id": "right-001",
+            "user_id": "user-123",
+            "device_id": "gate-A1",
+            "scope": "access",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "missing_client_headers"
+
+
+# #902
+def test_client_auth_rejects_missing_client_id(client):
+    ensure_setup(client)
+
+    headers = {
+        "X-API-Key": "super-secret",
+        "X-Tenant-Id": "tenant-demo",
+    }
+
+    response = client.post(
+        "/token/issue",
+        headers=headers,
+        json={
+            "tenant_id": "tenant-demo",
+            "right_id": "right-001",
+            "user_id": "user-123",
+            "device_id": "gate-A1",
+            "scope": "access",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "missing_client_headers"
+
+
+# #903
+def test_client_auth_rejects_missing_api_key(client):
+    ensure_setup(client)
+
+    headers = {
+        "X-Client-Id": "gateway-1",
+        "X-Tenant-Id": "tenant-demo",
+    }
+
+    response = client.post(
+        "/token/issue",
+        headers=headers,
+        json={
+            "tenant_id": "tenant-demo",
+            "right_id": "right-001",
+            "user_id": "user-123",
+            "device_id": "gate-A1",
+            "scope": "access",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "missing_client_headers"
+
+
+# #904
+def test_client_auth_rejects_wrong_api_key(client):
+    ensure_setup(client)
+
+    headers = {
+        "X-Client-Id": "gateway-1",
+        "X-API-Key": "wrong-secret",
+        "X-Tenant-Id": "tenant-demo",
+    }
+
+    response = client.post(
+        "/token/issue",
+        headers=headers,
+        json={
+            "tenant_id": "tenant-demo",
+            "right_id": "right-001",
+            "user_id": "user-123",
+            "device_id": "gate-A1",
+            "scope": "access",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_client"
+
+
+# #905
+def test_client_auth_rejects_cross_tenant_credential_mix(client):
+    ensure_setup(client)
+
+    headers = {
+        "X-Client-Id": "gateway-1",
+        "X-API-Key": "super-secret",
+        "X-Tenant-Id": "tenant-other",
+    }
+
+    response = client.post(
+        "/token/issue",
+        headers=headers,
+        json={
+            "tenant_id": "tenant-other",
+            "right_id": "right-777",
+            "user_id": "user-777",
+            "device_id": "gate-X1",
+            "scope": "access",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_client"
+
+
+# #906
+def test_client_auth_rejects_disabled_credential(client):
+    ensure_setup(client)
+
+    from app.database import SessionLocal
+    from app.models import ClientCredential
+
+    with SessionLocal() as db:
+        credential = (
+            db.query(ClientCredential)
+            .filter_by(
+                tenant_id="tenant-demo",
+                client_id="gateway-1",
+            )
+            .one()
+        )
+        credential.enabled = False
+        db.commit()
+
+    response = client.post(
+        "/token/issue",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "right_id": "right-001",
+            "user_id": "user-123",
+            "device_id": "gate-A1",
+            "scope": "access",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_client"
