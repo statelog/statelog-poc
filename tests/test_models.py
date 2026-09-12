@@ -242,3 +242,43 @@ def test_outbox_event_expected_indexed_columns():
         "event_type",
         "next_attempt_at",
     }.issubset(indexed)
+
+# #834
+def test_webhook_delivery_attempt_has_unique_delivery_attempt_index():
+    indexes = {
+        index.name: index
+        for index in WebhookDeliveryAttempt.__table__.indexes
+    }
+
+    assert (
+        "uq_webhook_delivery_attempt_event_subscription_attempt"
+        in indexes
+    )
+
+
+# #835
+def test_webhook_delivery_attempt_unique_index_has_expected_columns():
+    index = next(
+        index
+        for index in WebhookDeliveryAttempt.__table__.indexes
+        if index.name
+        == "uq_webhook_delivery_attempt_event_subscription_attempt"
+    )
+
+    assert [column.name for column in index.columns] == [
+        "event_id",
+        "subscription_id",
+        "attempt_number",
+    ]
+
+
+# #836
+def test_webhook_delivery_attempt_delivery_index_is_unique():
+    index = next(
+        index
+        for index in WebhookDeliveryAttempt.__table__.indexes
+        if index.name
+        == "uq_webhook_delivery_attempt_event_subscription_attempt"
+    )
+
+    assert index.unique is True

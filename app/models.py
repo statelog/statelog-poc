@@ -2,7 +2,7 @@ from datetime import datetime
 
 from .time_utils import utcnow_naive
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 
@@ -186,6 +186,15 @@ class OutboxEvent(Base):
 
 class WebhookDeliveryAttempt(Base):
     __tablename__ = 'webhook_delivery_attempts'
+    __table_args__ = (
+        Index(
+            "uq_webhook_delivery_attempt_event_subscription_attempt",
+            "event_id",
+            "subscription_id",
+            "attempt_number",
+            unique=True,
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_id: Mapped[int] = mapped_column(ForeignKey('outbox_events.id'), index=True)

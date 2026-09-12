@@ -43,6 +43,7 @@ def test_migration_files_are_present_in_expected_order():
         "0005_request_log_policy_fields.py",
         "0006_policy_and_workflow_tables.py",
         "0007_outbox_claim_lease.py",
+        "0008_webhook_delivery_attempt_unique.py",
     ]
 
 
@@ -1387,7 +1388,7 @@ def test_alembic_full_round_trip_returns_to_head_revision(tmp_path, monkeypatch)
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert revision == "0007_outbox_claim_lease"
+    assert revision == "0008_webhook_delivery_attempt_unique"
 
 # #874
 def test_alembic_head_adds_outbox_claim_columns(tmp_path, monkeypatch):
@@ -1509,4 +1510,323 @@ def test_alembic_0007_round_trip_restores_outbox_claim_fields(
         index["name"] == "ix_outbox_events_claim_expires_at"
         for index in indexes
     )
-    assert revision == "0007_outbox_claim_lease"
+    assert revision == "0008_webhook_delivery_attempt_unique"
+
+# #878
+def test_alembic_head_adds_webhook_delivery_attempt_unique_index(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes(
+        "webhook_delivery_attempts"
+    )
+
+    assert any(
+        index["name"]
+        == "uq_webhook_delivery_attempt_event_subscription_attempt"
+        and index["column_names"]
+        == ["event_id", "subscription_id", "attempt_number"]
+        and index["unique"]
+        for index in indexes
+    )
+
+
+# #879
+def test_alembic_0008_unique_index_rejects_exact_duplicate(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import IntegrityError
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO outbox_events
+                (tenant_id, event_type, payload, delivered, dead_lettered,
+                 attempts, next_attempt_at, created_at)
+                VALUES
+                ('tenant-879', 'test.event', '{}', 0, 0, 0,
+                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO webhook_subscriptions
+                (tenant_id, target_url, event_type,
+                 signing_secret_hash, signing_secret_encrypted,
+                 signing_secret_key_version, enabled, created_at)
+                VALUES
+                ('tenant-879', 'https://example.com/879',
+                 'test.event', 'hash', 'encrypted', 'v1', 1,
+                 CURRENT_TIMESTAMP)
+                """
+            )
+        )
+
+        event_id = connection.execute(
+            text("SELECT id FROM outbox_events LIMIT 1")
+        ).scalar_one()
+        subscription_id = connection.execute(
+            text("SELECT id FROM webhook_subscriptions LIMIT 1")
+        ).scalar_one()
+
+        connection.execute(
+            text(
+                """
+                INSERT INTO webhook_delivery_attempts
+                (event_id, subscription_id, attempt_number,
+                 successful, signature_version, created_at)
+                VALUES
+                (:event_id, :subscription_id, 1, 0, 'v1',
+                 CURRENT_TIMESTAMP)
+                """
+            ),
+            {
+                "event_id": event_id,
+                "subscription_id": subscription_id,
+            },
+        )
+
+    with engine.begin() as connection:
+        try:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO webhook_delivery_attempts
+                    (event_id, subscription_id, attempt_number,
+                     successful, signature_version, created_at)
+                    VALUES
+                    (:event_id, :subscription_id, 1, 0, 'v1',
+                     CURRENT_TIMESTAMP)
+                    """
+                ),
+                {
+                    "event_id": event_id,
+                    "subscription_id": subscription_id,
+                },
+            )
+        except IntegrityError:
+            pass
+        else:
+            raise AssertionError("duplicate delivery attempt was accepted")
+
+
+# #880
+def test_alembic_0008_allows_different_attempt_number(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO outbox_events
+                (tenant_id, event_type, payload, delivered, dead_lettered,
+                 attempts, next_attempt_at, created_at)
+                VALUES
+                ('tenant-880', 'test.event', '{}', 0, 0, 0,
+                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO webhook_subscriptions
+                (tenant_id, target_url, event_type,
+                 signing_secret_hash, signing_secret_encrypted,
+                 signing_secret_key_version, enabled, created_at)
+                VALUES
+                ('tenant-880', 'https://example.com/880',
+                 'test.event', 'hash', 'encrypted', 'v1', 1,
+                 CURRENT_TIMESTAMP)
+                """
+            )
+        )
+
+        event_id = connection.execute(
+            text("SELECT id FROM outbox_events LIMIT 1")
+        ).scalar_one()
+        subscription_id = connection.execute(
+            text("SELECT id FROM webhook_subscriptions LIMIT 1")
+        ).scalar_one()
+
+        for attempt_number in (1, 2):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO webhook_delivery_attempts
+                    (event_id, subscription_id, attempt_number,
+                     successful, signature_version, created_at)
+                    VALUES
+                    (:event_id, :subscription_id, :attempt_number,
+                     0, 'v1', CURRENT_TIMESTAMP)
+                    """
+                ),
+                {
+                    "event_id": event_id,
+                    "subscription_id": subscription_id,
+                    "attempt_number": attempt_number,
+                },
+            )
+
+
+# #881
+def test_alembic_downgrade_0008_removes_unique_index(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0007_outbox_claim_lease")
+
+    indexes = inspect(create_engine(database_url)).get_indexes(
+        "webhook_delivery_attempts"
+    )
+
+    assert not any(
+        index["name"]
+        == "uq_webhook_delivery_attempt_event_subscription_attempt"
+        for index in indexes
+    )
+
+
+# #882
+def test_alembic_0008_round_trip_restores_unique_index(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect, text
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+
+    command.upgrade(config, "head")
+    command.downgrade(config, "0007_outbox_claim_lease")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    indexes = inspect(engine).get_indexes(
+        "webhook_delivery_attempts"
+    )
+
+    with engine.connect() as connection:
+        revision = connection.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalar_one()
+
+    assert any(
+        index["name"]
+        == "uq_webhook_delivery_attempt_event_subscription_attempt"
+        for index in indexes
+    )
+    assert revision == "0008_webhook_delivery_attempt_unique"
+
+
+# #883
+def test_alembic_head_revision_is_0008(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+
+    with engine.connect() as connection:
+        revision = connection.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalar_one()
+
+    assert revision == "0008_webhook_delivery_attempt_unique"
+
+
+# #884
+def test_alembic_0008_index_uses_exact_expected_columns(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes(
+        "webhook_delivery_attempts"
+    )
+
+    index = next(
+        index
+        for index in indexes
+        if index["name"]
+        == "uq_webhook_delivery_attempt_event_subscription_attempt"
+    )
+
+    assert index["column_names"] == [
+        "event_id",
+        "subscription_id",
+        "attempt_number",
+    ]
