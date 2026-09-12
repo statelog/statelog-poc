@@ -55,6 +55,11 @@ class WorkflowConfigRecord(Base):
         default=1,
     )
 
+    __mapper_args__ = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=utcnow_naive,
@@ -203,7 +208,12 @@ class PolicyRecord(Base):
     effect: Mapped[str] = mapped_column(String(16))
     priority: Mapped[int] = mapped_column(Integer, default=100)
     version: Mapped[int] = mapped_column(Integer, default=1)
-    
+
+    __mapper_args__ = {
+        "version_id_col": version,
+        "version_id_generator": False,
+    }
+
     request_types: Mapped[str] = mapped_column(Text, default="")
     countries: Mapped[str] = mapped_column(Text, default="")
     device_ids: Mapped[str] = mapped_column(Text, default="")

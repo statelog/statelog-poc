@@ -17,6 +17,7 @@ from redis import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm.exc import StaleDataError
 from sqlalchemy.orm import Session
 from .risk_engine import RiskEngine, RISK_SIGNAL_SCORES
 from .policy_engine import Policy, PolicyEngine
@@ -395,17 +396,31 @@ def emit_event(db: Session, tenant_id: str, event_type: str, payload: dict) -> N
     db.add(OutboxEvent(tenant_id=tenant_id, event_type=event_type, payload=json.dumps(payload), delivered=False))
 
 
-def commit_or_409(db: Session, detail: str = "already_exists") -> None:
+def commit_or_409(
+    db: Session,
+    detail: str = "already_exists",
+    stale_detail: str | None = None,
+) -> None:
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         logger.info("integrity_conflict", extra={"status_code": 409})
         raise HTTPException(status_code=409, detail=detail) from exc
+    except StaleDataError as exc:
+        db.rollback()
+        logger.info("stale_write_conflict", extra={"status_code": 409})
+        raise HTTPException(
+            status_code=409,
+            detail=stale_detail or detail,
+        ) from exc
     except SQLAlchemyError as exc:
         db.rollback()
         logger.exception("database_write_unavailable", extra={"status_code": 503})
-        raise HTTPException(status_code=503, detail="persistence_unavailable") from exc
+        raise HTTPException(
+            status_code=503,
+            detail="persistence_unavailable",
+        ) from exc
 
 
 
@@ -549,7 +564,11 @@ def update_workflow_config(
         record.execution_mode = payload.execution_mode
         record.version += 1
 
-    commit_or_409(db, detail="workflow_config_conflict")
+    commit_or_409(
+        db,
+        detail="workflow_config_conflict",
+        stale_detail="workflow_version_conflict",
+    )
     db.refresh(record)
 
     return {
@@ -749,7 +768,11 @@ def update_policy(
 
     policy.version += 1
 
-    commit_or_409(db, detail="policy_delete_conflict")
+    commit_or_409(
+        db,
+        detail="policy_update_conflict",
+        stale_detail="policy_version_conflict",
+    )
     db.refresh(policy)
 
     return {
@@ -851,7 +874,11 @@ def delete_policy(
 
     save_policy_history(db, policy)  
     db.delete(policy)
-    commit_or_409(db, detail="policy_delete_conflict")
+    commit_or_409(
+        db,
+        detail="policy_delete_conflict",
+        stale_detail="policy_version_conflict",
+    )
     return {
         "deleted": True,
         "policy_id": policy_id,

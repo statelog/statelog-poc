@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.config import settings
 from app.database import SessionLocal
 from app.main import commit_or_409, rate_limiter, replay_store
-from app.models import AccessRight, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription
+from app.models import AccessRight, OutboxEvent, PolicyRecord, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription, WorkflowConfigRecord
 from app.outbox_worker import deliver_pending_events
 
 ADMIN_HEADERS = {"X-Admin-Api-Key": "test-admin-key"}
@@ -475,6 +475,143 @@ def test_commit_or_409_returns_409_on_integrity_conflict():
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "workflow_config_conflict"
     assert session.rolled_back is True
+
+def test_commit_or_409_returns_409_on_stale_write_conflict():
+    from sqlalchemy.orm.exc import StaleDataError
+
+    class BrokenSession:
+        def __init__(self):
+            self.rolled_back = False
+
+        def commit(self):
+            raise StaleDataError("forced_stale_write")
+
+        def rollback(self):
+            self.rolled_back = True
+
+    session = BrokenSession()
+
+    with pytest.raises(HTTPException) as exc_info:
+        commit_or_409(
+            session,
+            detail="policy_update_conflict",
+            stale_detail="policy_version_conflict",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "policy_version_conflict"
+    assert session.rolled_back is True
+
+def test_policy_record_optimistic_lock_rejects_stale_session(client):
+    from sqlalchemy.orm.exc import StaleDataError
+
+    ensure_setup(client)
+
+    created = client.post(
+        "/admin/policies",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "name": "optimistic-lock-race-policy",
+            "effect": "allow",
+            "priority": 50,
+            "request_types": ["access"],
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 200
+    policy_id = created.json()["id"]
+
+    db_a = SessionLocal()
+    db_b = SessionLocal()
+
+    try:
+        policy_a = db_a.get(PolicyRecord, policy_id)
+        policy_b = db_b.get(PolicyRecord, policy_id)
+
+        assert policy_a is not None
+        assert policy_b is not None
+        assert policy_a.version == policy_b.version
+
+        original_version = policy_a.version
+
+        policy_a.priority = 51
+        policy_a.version = original_version + 1
+        db_a.commit()
+
+        policy_b.priority = 52
+        policy_b.version = original_version + 1
+
+        with pytest.raises(StaleDataError):
+            db_b.commit()
+
+        db_b.rollback()
+
+        with SessionLocal() as verify_db:
+            persisted = verify_db.get(PolicyRecord, policy_id)
+            assert persisted is not None
+            assert persisted.priority == 51
+            assert persisted.version == original_version + 1
+    finally:
+        db_a.close()
+        db_b.rollback()
+        db_b.close()
+
+def test_workflow_config_record_optimistic_lock_rejects_stale_session(client):
+    from sqlalchemy.orm.exc import StaleDataError
+
+    ensure_setup(client)
+
+    initial = client.put(
+        "/admin/workflow-config",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "include_risk_step": True,
+            "include_policy_step": True,
+            "execution_mode": "risk_first",
+        },
+    )
+    assert initial.status_code == 200
+
+    db_a = SessionLocal()
+    db_b = SessionLocal()
+
+    try:
+        workflow_a = db_a.get(WorkflowConfigRecord, "tenant-demo")
+        workflow_b = db_b.get(WorkflowConfigRecord, "tenant-demo")
+
+        assert workflow_a is not None
+        assert workflow_b is not None
+        assert workflow_a.version == workflow_b.version
+
+        original_version = workflow_a.version
+
+        workflow_a.execution_mode = "policy_first"
+        workflow_a.version = original_version + 1
+        db_a.commit()
+
+        workflow_b.include_risk_step = False
+        workflow_b.version = original_version + 1
+
+        with pytest.raises(StaleDataError):
+            db_b.commit()
+
+        db_b.rollback()
+
+        with SessionLocal() as verify_db:
+            persisted = verify_db.get(
+                WorkflowConfigRecord,
+                "tenant-demo",
+            )
+            assert persisted is not None
+            assert persisted.execution_mode == "policy_first"
+            assert persisted.include_risk_step is True
+            assert persisted.version == original_version + 1
+    finally:
+        db_a.close()
+        db_b.rollback()
+        db_b.close()
 
 def test_webhook_delivery_commit_failure_bubbles_for_supervisor_visibility(client, monkeypatch):
     ensure_setup(client)
