@@ -1332,6 +1332,24 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
 
     workflow_config_record = db.get(WorkflowConfigRecord, tenant.id)
     
+    if workflow_config_record is not None:
+        request_workflow_engine = WorkflowEngine(
+            WorkflowConfig(
+                include_risk_step=workflow_config_record.include_risk_step,
+                include_policy_step=workflow_config_record.include_policy_step,
+                execution_mode=workflow_config_record.execution_mode,
+            )
+        )
+    else:
+        request_workflow_engine = workflow_engine
+
+    workflow_decision = request_workflow_engine.evaluate(
+        risk_allowed=decision.allow,
+        policy_matched=policy_decision.matched,
+        policy_allowed=policy_decision.allow,
+        final_allowed=allowed,
+    )
+
     log = RequestLog(
         tenant_id=tenant.id,
         right_id=right.right_id,
@@ -1363,8 +1381,9 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
             if workflow_config_record is not None
             else None
         ),
+        decision_source=workflow_decision.decision_source,
+        decision_path=json.dumps(list(workflow_decision.decision_path)),
     )
-
     tenant.usage_count += 1
     db.add(log)
 
@@ -1430,30 +1449,6 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
 
     RISK_SCORE_HISTOGRAM.observe(decision.risk_score)
     LATENCY_HISTOGRAM.observe(time.perf_counter() - started)
-    
-    workflow_config_record = db.get(WorkflowConfigRecord, tenant.id)
-
-    if workflow_config_record is not None:
-        request_workflow_engine = WorkflowEngine(
-            WorkflowConfig(
-                include_risk_step=workflow_config_record.include_risk_step,
-                include_policy_step=workflow_config_record.include_policy_step,
-                execution_mode=workflow_config_record.execution_mode,
-            )
-        )
-    else:
-        request_workflow_engine = workflow_engine
-
-    workflow_decision = request_workflow_engine.evaluate(
-        risk_allowed=decision.allow,
-        policy_matched=policy_decision.matched,
-        policy_allowed=policy_decision.allow,
-        final_allowed=allowed,
-    )
-
-    log.decision_source = workflow_decision.decision_source
-    log.decision_path = json.dumps(list(workflow_decision.decision_path))
-    db.commit()
 
     response = {
         "allow": allowed,

@@ -5981,3 +5981,466 @@ def test_successful_ownership_transfer_increments_usage_count_once(client):
             .one()
         )
         assert right.owner_id == "user-456"
+
+# #885
+def test_request_access_has_decision_source_before_commit(client, monkeypatch):
+    import app.main as main_module
+
+    ensure_setup(client)
+    token = issue_token(client).json()["token"]
+
+    original_commit_or_409 = main_module.commit_or_409
+    observed = {}
+
+    def inspecting_commit(db, detail="already_exists"):
+        if detail == "duplicate_request":
+            pending_log = next(
+                obj
+                for obj in db.new
+                if isinstance(obj, RequestLog)
+                and obj.idempotency_key == "single-tx-source"
+            )
+            observed["decision_source"] = pending_log.decision_source
+
+        return original_commit_or_409(db, detail)
+
+    monkeypatch.setattr(
+        main_module,
+        "commit_or_409",
+        inspecting_commit,
+    )
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "single-tx-source",
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.72.1.1",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 200
+    assert observed["decision_source"] is not None
+    assert observed["decision_source"] == (
+        response.json()["explanation"]["final"]["decision_source"]
+    )
+
+
+# #886
+def test_request_access_has_decision_path_before_commit(client, monkeypatch):
+    import json
+    import app.main as main_module
+
+    ensure_setup(client)
+    token = issue_token(client).json()["token"]
+
+    original_commit_or_409 = main_module.commit_or_409
+    observed = {}
+
+    def inspecting_commit(db, detail="already_exists"):
+        if detail == "duplicate_request":
+            pending_log = next(
+                obj
+                for obj in db.new
+                if isinstance(obj, RequestLog)
+                and obj.idempotency_key == "single-tx-path"
+            )
+            observed["decision_path"] = pending_log.decision_path
+
+        return original_commit_or_409(db, detail)
+
+    monkeypatch.setattr(
+        main_module,
+        "commit_or_409",
+        inspecting_commit,
+    )
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "single-tx-path",
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.72.1.2",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 200
+
+    pending_path = json.loads(observed["decision_path"])
+
+    assert pending_path
+    assert pending_path == (
+        response.json()["explanation"]["final"]["decision_path"]
+    )
+
+
+# #887
+def test_request_access_has_workflow_version_before_commit(client, monkeypatch):
+    import app.main as main_module
+
+    ensure_setup(client)
+    token = issue_token(client).json()["token"]
+
+    original_commit_or_409 = main_module.commit_or_409
+    observed = {}
+
+    def inspecting_commit(db, detail="already_exists"):
+        if detail == "duplicate_request":
+            pending_log = next(
+                obj
+                for obj in db.new
+                if isinstance(obj, RequestLog)
+                and obj.idempotency_key == "single-tx-version"
+            )
+            observed["workflow_version"] = pending_log.workflow_version
+
+        return original_commit_or_409(db, detail)
+
+    monkeypatch.setattr(
+        main_module,
+        "commit_or_409",
+        inspecting_commit,
+    )
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "single-tx-version",
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.72.1.3",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 200
+
+    expected_version = response.json()["workflow_version"]
+
+    if observed["workflow_version"] is None:
+        assert expected_version == 1
+    else:
+        assert observed["workflow_version"] == expected_version
+
+
+# #888
+def test_request_access_uses_single_persistence_commit(client, monkeypatch):
+    import app.main as main_module
+
+    ensure_setup(client)
+    token = issue_token(client).json()["token"]
+
+    original_commit_or_409 = main_module.commit_or_409
+    commit_details = []
+
+    def counting_commit(db, detail="already_exists"):
+        commit_details.append(detail)
+        return original_commit_or_409(db, detail)
+
+    monkeypatch.setattr(
+        main_module,
+        "commit_or_409",
+        counting_commit,
+    )
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "single-tx-count",
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.72.1.4",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 200
+    assert commit_details == ["duplicate_request"]
+
+
+# #889
+def test_request_access_persists_workflow_metadata_with_request_log(client):
+    import json
+
+    ensure_setup(client)
+    token = issue_token(client).json()["token"]
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "single-tx-persisted",
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.72.1.5",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.tenant_id == "tenant-demo",
+                RequestLog.idempotency_key == "single-tx-persisted",
+            )
+            .one()
+        )
+
+        assert log.decision_source == (
+            body["explanation"]["final"]["decision_source"]
+        )
+        assert json.loads(log.decision_path) == (
+            body["explanation"]["final"]["decision_path"]
+        )
+
+
+# #890
+def test_request_access_commit_failure_rolls_back_request_log(
+    client,
+    monkeypatch,
+):
+    from fastapi import HTTPException
+    import app.main as main_module
+
+    ensure_setup(client)
+    token = issue_token(client).json()["token"]
+
+    def failing_commit(db, detail="already_exists"):
+        if detail == "duplicate_request":
+            db.rollback()
+            raise HTTPException(
+                status_code=503,
+                detail="persistence_unavailable",
+            )
+
+        raise AssertionError(
+            f"unexpected commit detail: {detail}"
+        )
+
+    monkeypatch.setattr(
+        main_module,
+        "commit_or_409",
+        failing_commit,
+    )
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "single-tx-failure",
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.72.1.6",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "persistence_unavailable"
+
+    with SessionLocal() as db:
+        log = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.tenant_id == "tenant-demo",
+                RequestLog.idempotency_key == "single-tx-failure",
+            )
+            .one_or_none()
+        )
+
+        assert log is None
+
+
+# #891
+def test_request_access_commit_failure_sees_complete_pending_log(
+    client,
+    monkeypatch,
+):
+    from fastapi import HTTPException
+    import json
+    import app.main as main_module
+
+    ensure_setup(client)
+    token = issue_token(client).json()["token"]
+
+    observed = {}
+
+    def failing_commit(db, detail="already_exists"):
+        if detail == "duplicate_request":
+            pending_log = next(
+                obj
+                for obj in db.new
+                if isinstance(obj, RequestLog)
+                and obj.idempotency_key == "single-tx-complete"
+            )
+
+            observed["decision_source"] = pending_log.decision_source
+            observed["decision_path"] = json.loads(
+                pending_log.decision_path
+            )
+            observed["workflow_version"] = (
+                pending_log.workflow_version
+            )
+
+            db.rollback()
+
+            raise HTTPException(
+                status_code=503,
+                detail="persistence_unavailable",
+            )
+
+        raise AssertionError(
+            f"unexpected commit detail: {detail}"
+        )
+
+    monkeypatch.setattr(
+        main_module,
+        "commit_or_409",
+        failing_commit,
+    )
+
+    response = client.post(
+        "/request/access",
+        headers={
+            **HEADERS,
+            "Idempotency-Key": "single-tx-complete",
+        },
+        json={
+            "device_id": "gate-A1",
+            "request_type": "access",
+            "ip_address": "10.72.1.7",
+            "country_code": "EE",
+            "token": token,
+        },
+    )
+
+    assert response.status_code == 503
+    assert observed["decision_source"] is not None
+    assert observed["decision_path"]
+    assert (
+        observed["workflow_version"] is None
+        or observed["workflow_version"] >= 1
+    )
+
+
+# #892
+def test_request_access_retry_after_failed_commit_requires_fresh_token(
+    client,
+    monkeypatch,
+):
+    from fastapi import HTTPException
+    import app.main as main_module
+
+    ensure_setup(client)
+
+    first_token = issue_token(client).json()["token"]
+
+    original_commit_or_409 = main_module.commit_or_409
+    fail_once = True
+
+    def flaky_commit(db, detail="already_exists"):
+        nonlocal fail_once
+
+        if detail == "duplicate_request" and fail_once:
+            fail_once = False
+            db.rollback()
+
+            raise HTTPException(
+                status_code=503,
+                detail="persistence_unavailable",
+            )
+
+        return original_commit_or_409(db, detail)
+
+    monkeypatch.setattr(
+        main_module,
+        "commit_or_409",
+        flaky_commit,
+    )
+
+    headers = {
+        **HEADERS,
+        "Idempotency-Key": "single-tx-retry",
+    }
+
+    payload = {
+        "device_id": "gate-A1",
+        "request_type": "access",
+        "ip_address": "10.72.1.8",
+        "country_code": "EE",
+        "token": first_token,
+    }
+
+    first = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert first.status_code == 503
+    assert first.json()["detail"] == "persistence_unavailable"
+
+    same_token_retry = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert same_token_retry.status_code == 409
+    assert same_token_retry.json()["detail"] == "replay_detected"
+
+    fresh_token = issue_token(client).json()["token"]
+
+    payload["token"] = fresh_token
+
+    fresh_token_retry = client.post(
+        "/request/access",
+        headers=headers,
+        json=payload,
+    )
+
+    assert fresh_token_retry.status_code == 200
+
+    with SessionLocal() as db:
+        logs = (
+            db.query(RequestLog)
+            .filter(
+                RequestLog.tenant_id == "tenant-demo",
+                RequestLog.idempotency_key == "single-tx-retry",
+            )
+            .all()
+        )
+
+        assert len(logs) == 1
+        assert logs[0].decision_source is not None
+        assert logs[0].decision_path
