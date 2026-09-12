@@ -58,6 +58,26 @@ def _claim_outbox_event(
     db.commit()
     return claim_token
 
+def _release_outbox_claim(
+    db: Session,
+    *,
+    event_id: int,
+    claim_token: str,
+) -> bool:
+    result = db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == event_id,
+            OutboxEvent.claimed_by == claim_token,
+        )
+        .values(
+            claimed_by=None,
+            claim_expires_at=None,
+        )
+    )
+    db.commit()
+    return result.rowcount == 1
+
 def _already_delivered(db: Session, *, event_id: int, subscription_id: int) -> bool:
     successful = db.scalar(
         select(func.count())
@@ -148,11 +168,29 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
             event.delivered_at = utcnow_naive()
             event.claimed_by = None
             event.claim_expires_at = None
-            delivered_count += 1
-            db.commit()
-            continue
 
-        payload = json.loads(event.payload)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+                _release_outbox_claim(
+                    db,
+                    event_id=event.id,
+                    claim_token=claim_token,
+                )
+                raise
+
+        try:
+            payload = json.loads(event.payload)
+        except Exception:
+            db.rollback()
+            _release_outbox_claim(
+                db,
+                event_id=event.id,
+                claim_token=claim_token,
+            )
+            raise
+
         event.attempts += 1
         delivery_failed = False
         event.last_error = None
@@ -215,15 +253,25 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
             except Exception as exc:  # noqa: BLE001
                 delivery_failed = True
                 event.last_error = str(exc)[:500]
-                _record_attempt(
-                    db,
-                    event_id=event.id,
-                    subscription_id=sub.id,
-                    attempt_number=event.attempts,
-                    successful=False,
-                    response_status_code=None,
-                    error_message=event.last_error,
-                )
+
+                try:
+                    _record_attempt(
+                        db,
+                        event_id=event.id,
+                        subscription_id=sub.id,
+                        attempt_number=event.attempts,
+                        successful=False,
+                        response_status_code=None,
+                        error_message=event.last_error,
+                    )
+                except Exception:
+                    db.rollback()
+                    _release_outbox_claim(
+                        db,
+                        event_id=event.id,
+                        claim_token=claim_token,
+                    )
+                    raise
 
         if delivery_failed:
             if event.attempts >= settings.webhook_max_attempts:
@@ -248,8 +296,17 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
 
         event.claimed_by = None
         event.claim_expires_at = None
-        db.commit()
 
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            _release_outbox_claim(
+                db,
+                event_id=event.id,
+                claim_token=claim_token,
+            )
+            raise
     return delivered_count
 
 

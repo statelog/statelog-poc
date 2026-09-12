@@ -1,4 +1,5 @@
 import json
+import pytest
 from datetime import timedelta
 
 from app.config import settings
@@ -1962,3 +1963,139 @@ def test_outbox_two_subscriptions_keep_stable_ids_across_retry(monkeypatch):
     assert first_ids == second_ids
     assert len(first_ids) == 2
     assert len(set(first_ids.values())) == 2
+
+# #893
+def test_outbox_malformed_payload_releases_claim():
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-893",
+        )
+        event.payload = "{not-valid-json"
+        setup_db.commit()
+        event_id = event.id
+
+        _make_outbox_subscription(
+            setup_db,
+            tenant_id="outbox-893",
+            target_url="https://example.test/webhook",
+        )
+
+    with pytest.raises(json.JSONDecodeError):
+        with SessionLocal() as db:
+            deliver_pending_events(db)
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+
+        assert event is not None
+        assert event.delivered is False
+        assert event.claimed_by is None
+        assert event.claim_expires_at is None
+
+
+# #894
+def test_outbox_attempt_recording_failure_releases_claim(monkeypatch):
+    import app.outbox_worker as worker_module
+
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-894",
+        )
+        event_id = event.id
+
+        _make_outbox_subscription(
+            setup_db,
+            tenant_id="outbox-894",
+            target_url="https://example.test/webhook",
+        )
+
+    _patch_outbox_secret(monkeypatch)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(200),
+    )
+
+    def failing_record_attempt(*args, **kwargs):
+        raise RuntimeError("attempt_recording_failed")
+
+    monkeypatch.setattr(
+        worker_module,
+        "_record_attempt",
+        failing_record_attempt,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="attempt_recording_failed",
+    ):
+        with SessionLocal() as db:
+            deliver_pending_events(db)
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+
+        assert event is not None
+        assert event.delivered is False
+        assert event.claimed_by is None
+        assert event.claim_expires_at is None
+
+
+# #895
+def test_outbox_final_commit_failure_releases_claim(monkeypatch):
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-895",
+        )
+        event_id = event.id
+
+        _make_outbox_subscription(
+            setup_db,
+            tenant_id="outbox-895",
+            target_url="https://example.test/webhook",
+        )
+
+    _patch_outbox_secret(monkeypatch)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(200),
+    )
+
+    with SessionLocal() as db:
+        original_commit = db.commit
+        commit_calls = 0
+
+        def failing_second_commit():
+            nonlocal commit_calls
+            commit_calls += 1
+
+            if commit_calls == 2:
+                raise RuntimeError("final_commit_failed")
+
+            return original_commit()
+
+        monkeypatch.setattr(
+            db,
+            "commit",
+            failing_second_commit,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="final_commit_failed",
+        ):
+            deliver_pending_events(db)
+
+        db.rollback()
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+
+        assert event is not None
+        assert event.delivered is False
+        assert event.claimed_by is None
+        assert event.claim_expires_at is None
