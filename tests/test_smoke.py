@@ -1863,3 +1863,84 @@ def test_client_auth_rejects_disabled_credential(client):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_client"
+
+def test_rate_limit_fail_open_falls_back_to_memory(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+
+    class BrokenRedisLimiter:
+        def allow(self, *args, **kwargs):
+            raise RedisError("redis_down")
+
+    original = rate_limiter.redis_limiter, rate_limiter.fail_closed
+    rate_limiter.redis_limiter = BrokenRedisLimiter()
+    rate_limiter.fail_closed = False
+
+    try:
+        response = access_request(
+            client,
+            token,
+            ip_address="10.0.0.80",
+        )
+
+        assert response.status_code == 200
+    finally:
+        rate_limiter.redis_limiter, rate_limiter.fail_closed = original
+
+def test_invalid_client_auth_does_not_reach_rate_limiter(client, monkeypatch):
+    ensure_setup(client)
+
+    def should_not_be_called(*args, **kwargs):
+        raise AssertionError("rate_limiter_should_not_be_called")
+
+    monkeypatch.setattr(rate_limiter, "allow", should_not_be_called)
+
+    headers = {
+        "X-Client-Id": "gateway-1",
+        "X-API-Key": "wrong-secret",
+        "X-Tenant-Id": "tenant-demo",
+    }
+
+    response = client.post(
+        "/request/access",
+        headers=headers,
+        json={
+            "token": "irrelevant-token",
+            "request_type": "access",
+            "device_id": "gate-A1",
+            "ip_address": "10.0.0.81",
+            "country_code": "EE",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_client"
+
+def test_client_rate_limit_cannot_be_bypassed_with_different_ip(client):
+    ensure_setup(client)
+
+    old_limit = settings.rate_limit_per_minute
+    settings.rate_limit_per_minute = 1
+
+    try:
+        first_token = issue_token(client).json()["token"]
+        first = access_request(
+            client,
+            first_token,
+            ip_address="10.0.0.82",
+        )
+
+        assert first.status_code == 200
+
+        second_token = issue_token(client).json()["token"]
+        second = access_request(
+            client,
+            second_token,
+            ip_address="10.0.0.83",
+        )
+
+        assert second.status_code == 429
+        assert second.json()["detail"] == "rate_limited"
+    finally:
+        settings.rate_limit_per_minute = old_limit
