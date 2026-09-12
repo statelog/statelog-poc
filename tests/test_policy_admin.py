@@ -19300,3 +19300,15 @@ def test_workflow_create_without_expected_version_still_succeeds(client):
     assert response.status_code == 200
     assert response.json()["version"] == 1
     assert response.json()["tenant_id"] == tenant_id
+
+def test_admin_auth_rejects_whitespace_only_api_key(client):
+    ensure_setup(client)
+
+    response = client.get(
+        "/admin/policies",
+        headers={"X-Admin-Api-Key": "   "},
+        params={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
