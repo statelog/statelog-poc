@@ -1520,7 +1520,10 @@ def create_webhook(payload: WebhookCreate, db: Session = Depends(get_db), client
         signing_secret_key_version=active_kid,
     )
     db.add(sub)
-    db.commit()
+    commit_or_409(
+        db,
+        detail="webhook_subscription_conflict",
+    )
     return {"subscription_id": sub.id}
 
 
