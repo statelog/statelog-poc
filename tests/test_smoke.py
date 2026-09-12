@@ -315,7 +315,7 @@ def test_webhook_delivery_is_signed_and_tracked(client, monkeypatch):
     class Response:
         status_code = 202
 
-    def fake_post(url, json=None, timeout=None, headers=None):
+    def fake_post(url, json=None, timeout=None, headers=None, **kwargs):
         captured['url'] = url
         captured['json'] = json
         captured['headers'] = headers

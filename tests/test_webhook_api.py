@@ -138,6 +138,27 @@ def test_webhook_subscription_rejects_invalid_target_url(client):
 
     assert response.status_code == 422
 
+def test_webhook_subscription_rejects_loopback_target_url(client):
+    response = client.post(
+        "/webhooks/subscriptions",
+        headers=HEADERS,
+        json=webhook_payload(
+            target_url="http://127.0.0.1:8080/webhook",
+        ),
+    )
+
+    assert response.status_code == 422
+
+def test_webhook_subscription_rejects_localhost_target_url(client):
+    response = client.post(
+        "/webhooks/subscriptions",
+        headers=HEADERS,
+        json=webhook_payload(
+            target_url="http://localhost:8080/webhook",
+        ),
+    )
+
+    assert response.status_code == 422
 
 # #783
 def test_webhook_subscription_rejects_tenant_mismatch(client):

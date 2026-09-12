@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from ipaddress import ip_address
 from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
@@ -64,6 +65,28 @@ class WebhookCreate(BaseModel):
         pattern=r".*\S.*",
     )
     target_url: HttpUrl
+
+    @model_validator(mode="after")
+    def reject_unsafe_target_url(self):
+        host = self.target_url.host
+
+        if host and (
+            host.lower() == "localhost"
+            or host.lower().endswith(".localhost")
+        ):
+            raise ValueError("webhook_target_url_must_be_public")
+
+        if host:
+            try:
+                address = ip_address(host)
+            except ValueError:
+                return self
+
+            if not address.is_global:
+                raise ValueError("webhook_target_url_must_be_public")
+
+        return self
+
     event_type: str = Field(
         min_length=1,
         pattern=r".*\S.*",

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from ipaddress import ip_address
+from urllib.parse import urlparse
 import json
 import logging
+import socket
 import time
 from datetime import timedelta
 from uuid import uuid4
@@ -18,6 +21,55 @@ from .time_utils import utcnow_naive
 
 logger = logging.getLogger(__name__)
 
+def _validate_webhook_target_url(target_url: str) -> None:
+    parsed = urlparse(target_url)
+    host = parsed.hostname
+
+    if not host:
+        raise ValueError("unsafe_webhook_target")
+
+    normalized_host = host.lower()
+
+    if (
+        normalized_host == "localhost"
+        or normalized_host.endswith(".localhost")
+    ):
+        raise ValueError("unsafe_webhook_target")
+
+    try:
+        address = ip_address(host)
+    except ValueError:
+        address = None
+
+    if address is not None:
+        if not address.is_global:
+            raise ValueError("unsafe_webhook_target")
+        return
+
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+
+    try:
+        resolved = socket.getaddrinfo(
+            host,
+            port,
+            type=socket.SOCK_STREAM,
+        )
+    except socket.gaierror:
+        # Let requests handle ordinary DNS delivery failures.
+        return
+
+    for result in resolved:
+        resolved_ip = result[4][0]
+
+        try:
+            resolved_address = ip_address(resolved_ip)
+        except ValueError:
+            raise ValueError("unsafe_webhook_target")
+
+        if not resolved_address.is_global:
+            raise ValueError("unsafe_webhook_target")
 
 def backoff_seconds(attempts: int) -> int:
     return min(2 ** max(attempts, 0), 300)
@@ -207,6 +259,8 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
             delivery_id = f"evt-{event.id}-sub-{sub.id}"
 
             try:
+                _validate_webhook_target_url(sub.target_url)
+
                 secret = decrypt_secret(sub.signing_secret_encrypted)
                 signature = sign_webhook_payload(
                     secret=secret,
@@ -217,6 +271,7 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
                     sub.target_url,
                     json=payload,
                     timeout=settings.webhook_timeout_seconds,
+                    allow_redirects=False,
                     headers={
                         settings.webhook_signature_header: signature,
                         settings.webhook_timestamp_header: str(timestamp),

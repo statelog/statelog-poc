@@ -846,6 +846,72 @@ def test_outbox_one_failed_subscription_keeps_event_pending(monkeypatch):
             attempt.successful for attempt in attempts
         ) == [False, True]
 
+def test_outbox_worker_does_not_call_private_webhook_target(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+
+    post_called = False
+
+    def fake_post(url, **kwargs):
+        nonlocal post_called
+        post_called = True
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-ssrf-private",
+            target_url="http://127.0.0.1:8080/webhook",
+        )
+        _make_outbox_event(
+            db,
+            tenant_id="outbox-ssrf-private",
+        )
+
+        deliver_pending_events(db)
+
+    assert post_called is False
+
+def test_outbox_worker_does_not_call_hostname_resolving_to_private_ip(monkeypatch):
+    _patch_outbox_secret(monkeypatch)
+
+    post_called = False
+
+    def fake_post(url, **kwargs):
+        nonlocal post_called
+        post_called = True
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    monkeypatch.setattr(
+        "app.outbox_worker.socket.getaddrinfo",
+        lambda *args, **kwargs: [
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+        ],
+    )
+
+    with SessionLocal() as db:
+        _make_outbox_subscription(
+            db,
+            tenant_id="outbox-ssrf-dns",
+            target_url="https://internal.example/webhook",
+        )
+        _make_outbox_event(
+            db,
+            tenant_id="outbox-ssrf-dns",
+        )
+
+        deliver_pending_events(db)
+
+    assert post_called is False
 
 # #745
 def test_outbox_successful_subscription_is_not_redelivered(monkeypatch):
