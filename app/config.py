@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     webhook_delivery_id_header: str = "X-Webhook-Delivery-Id"
     outbox_batch_size: int = 100
     outbox_poll_interval_seconds: int = 5
+    outbox_claim_lease_seconds: int = 60
     webhook_timeout_seconds: int = 5
     webhook_max_attempts: int = 5
     request_decision_version: str = "v8.2"

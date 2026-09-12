@@ -4,9 +4,10 @@ import json
 import logging
 import time
 from datetime import timedelta
+from uuid import uuid4
 
 import requests
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -21,6 +22,41 @@ logger = logging.getLogger(__name__)
 def backoff_seconds(attempts: int) -> int:
     return min(2 ** max(attempts, 0), 300)
 
+def _claim_outbox_event(
+    db: Session,
+    *,
+    event_id: int,
+    now,
+    lease_seconds: int = 60,
+) -> str | None:
+    claim_token = uuid4().hex
+    claim_expires_at = now + timedelta(seconds=lease_seconds)
+
+    result = db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == event_id,
+            OutboxEvent.delivered.is_(False),
+            OutboxEvent.dead_lettered.is_(False),
+            OutboxEvent.next_attempt_at <= now,
+            or_(
+                OutboxEvent.claimed_by.is_(None),
+                OutboxEvent.claim_expires_at.is_(None),
+                OutboxEvent.claim_expires_at <= now,
+            ),
+        )
+        .values(
+            claimed_by=claim_token,
+            claim_expires_at=claim_expires_at,
+        )
+    )
+
+    if result.rowcount != 1:
+        db.rollback()
+        return None
+
+    db.commit()
+    return claim_token
 
 def _already_delivered(db: Session, *, event_id: int, subscription_id: int) -> bool:
     successful = db.scalar(
@@ -61,16 +97,42 @@ def _record_attempt(
 def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
     now = utcnow_naive()
     size = batch_size or settings.outbox_batch_size
-    events = list(
+
+    event_ids = list(
         db.scalars(
-            select(OutboxEvent)
-            .where(OutboxEvent.delivered.is_(False), OutboxEvent.dead_lettered.is_(False), OutboxEvent.next_attempt_at <= now)
+            select(OutboxEvent.id)
+            .where(
+                OutboxEvent.delivered.is_(False),
+                OutboxEvent.dead_lettered.is_(False),
+                OutboxEvent.next_attempt_at <= now,
+                or_(
+                    OutboxEvent.claimed_by.is_(None),
+                    OutboxEvent.claim_expires_at.is_(None),
+                    OutboxEvent.claim_expires_at <= now,
+                ),
+            )
             .order_by(OutboxEvent.created_at.asc())
             .limit(size)
         )
     )
+
     delivered_count = 0
-    for event in events:
+
+    for event_id in event_ids:
+        claim_now = utcnow_naive()
+        claim_token = _claim_outbox_event(
+            db,
+            event_id=event_id,
+            now=claim_now,
+            lease_seconds=settings.outbox_claim_lease_seconds,
+        )
+        if claim_token is None:
+            continue
+
+        event = db.get(OutboxEvent, event_id)
+        if event is None or event.claimed_by != claim_token:
+            continue
+
         subs = list(
             db.scalars(
                 select(WebhookSubscription).where(
@@ -80,10 +142,14 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
                 )
             )
         )
+
         if not subs:
             event.delivered = True
             event.delivered_at = utcnow_naive()
+            event.claimed_by = None
+            event.claim_expires_at = None
             delivered_count += 1
+            db.commit()
             continue
 
         payload = json.loads(event.payload)
@@ -92,14 +158,25 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
         event.last_error = None
 
         for sub in subs:
-            if _already_delivered(db, event_id=event.id, subscription_id=sub.id):
+            if _already_delivered(
+                db,
+                event_id=event.id,
+                subscription_id=sub.id,
+            ):
                 continue
 
             timestamp = int(time.time())
-            delivery_id = f"evt-{event.id}-sub-{sub.id}-try-{event.attempts}"
+            delivery_id = (
+                f"evt-{event.id}-sub-{sub.id}-try-{event.attempts}"
+            )
+
             try:
                 secret = decrypt_secret(sub.signing_secret_encrypted)
-                signature = sign_webhook_payload(secret=secret, payload=payload, timestamp=timestamp)
+                signature = sign_webhook_payload(
+                    secret=secret,
+                    payload=payload,
+                    timestamp=timestamp,
+                )
                 response = requests.post(
                     sub.target_url,
                     json=payload,
@@ -111,6 +188,7 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
                         settings.webhook_delivery_id_header: delivery_id,
                     },
                 )
+
                 if 200 <= response.status_code < 300:
                     _record_attempt(
                         db,
@@ -123,7 +201,9 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
                     )
                 else:
                     delivery_failed = True
-                    event.last_error = f"webhook_http_{response.status_code}"
+                    event.last_error = (
+                        f"webhook_http_{response.status_code}"
+                    )
                     _record_attempt(
                         db,
                         event_id=event.id,
@@ -133,6 +213,7 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
                         response_status_code=response.status_code,
                         error_message=event.last_error,
                     )
+
             except Exception as exc:  # noqa: BLE001
                 delivery_failed = True
                 event.last_error = str(exc)[:500]
@@ -150,15 +231,27 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
             if event.attempts >= settings.webhook_max_attempts:
                 event.dead_lettered = True
                 event.next_attempt_at = utcnow_naive()
-                logger.warning('outbox_event_dead_lettered', extra={'event_id': event.id})
+                logger.warning(
+                    "outbox_event_dead_lettered",
+                    extra={"event_id": event.id},
+                )
             else:
-                event.next_attempt_at = utcnow_naive() + timedelta(seconds=backoff_seconds(event.attempts))
+                event.next_attempt_at = (
+                    utcnow_naive()
+                    + timedelta(
+                        seconds=backoff_seconds(event.attempts)
+                    )
+                )
         else:
             event.delivered = True
             event.delivered_at = utcnow_naive()
             event.last_error = None
             delivered_count += 1
-    db.commit()
+
+        event.claimed_by = None
+        event.claim_expires_at = None
+        db.commit()
+
     return delivered_count
 
 

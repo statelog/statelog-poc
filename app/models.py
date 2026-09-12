@@ -173,6 +173,12 @@ class OutboxEvent(Base):
     dead_lettered: Mapped[bool] = mapped_column(Boolean, default=False)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, index=True)
+    claimed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+        index=True,
+    )
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

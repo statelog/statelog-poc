@@ -42,6 +42,7 @@ def test_migration_files_are_present_in_expected_order():
         "0004_v83_replay_explainability.py",
         "0005_request_log_policy_fields.py",
         "0006_policy_and_workflow_tables.py",
+        "0007_outbox_claim_lease.py",
     ]
 
 
@@ -1386,4 +1387,126 @@ def test_alembic_full_round_trip_returns_to_head_revision(tmp_path, monkeypatch)
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert revision == "0006_policy_and_workflow_tables"
+    assert revision == "0007_outbox_claim_lease"
+
+# #874
+def test_alembic_head_adds_outbox_claim_columns(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    columns = {
+        column["name"]
+        for column in inspect(create_engine(database_url)).get_columns(
+            "outbox_events"
+        )
+    }
+
+    assert "claimed_by" in columns
+    assert "claim_expires_at" in columns
+
+
+# #875
+def test_alembic_head_adds_outbox_claim_expiry_index(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    indexes = inspect(create_engine(database_url)).get_indexes(
+        "outbox_events"
+    )
+
+    assert any(
+        index["name"] == "ix_outbox_events_claim_expires_at"
+        and index["column_names"] == ["claim_expires_at"]
+        and not index["unique"]
+        for index in indexes
+    )
+
+
+# #876
+def test_alembic_downgrade_0007_removes_outbox_claim_fields(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+    command.downgrade(config, "0006_policy_and_workflow_tables")
+
+    inspector = inspect(create_engine(database_url))
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("outbox_events")
+    }
+    indexes = inspector.get_indexes("outbox_events")
+
+    assert "claimed_by" not in columns
+    assert "claim_expires_at" not in columns
+    assert not any(
+        index["name"] == "ix_outbox_events_claim_expires_at"
+        for index in indexes
+    )
+
+
+# #877
+def test_alembic_0007_round_trip_restores_outbox_claim_fields(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect, text
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+
+    command.upgrade(config, "head")
+    command.downgrade(config, "0006_policy_and_workflow_tables")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
+
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("outbox_events")
+    }
+    indexes = inspector.get_indexes("outbox_events")
+
+    with engine.connect() as connection:
+        revision = connection.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalar_one()
+
+    assert "claimed_by" in columns
+    assert "claim_expires_at" in columns
+    assert any(
+        index["name"] == "ix_outbox_events_claim_expires_at"
+        for index in indexes
+    )
+    assert revision == "0007_outbox_claim_lease"

@@ -10,6 +10,7 @@ from app.models import (
 )
 from app.outbox_worker import (
     _already_delivered,
+    _claim_outbox_event,
     _record_attempt,
     backoff_seconds,
     deliver_pending_events,
@@ -1194,3 +1195,346 @@ def test_outbox_batch_processes_oldest_event_first():
         assert count == 1
         assert older.delivered is True
         assert newer.delivered is False
+
+# #755
+def test_outbox_atomic_claim_rejects_second_session():
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-755",
+        )
+        event_id = event.id
+
+    now = utcnow_naive()
+
+    with SessionLocal() as db_a:
+        claim_a = _claim_outbox_event(
+            db_a,
+            event_id=event_id,
+            now=now,
+        )
+
+    with SessionLocal() as db_b:
+        claim_b = _claim_outbox_event(
+            db_b,
+            event_id=event_id,
+            now=now,
+        )
+
+    assert claim_a is not None
+    assert claim_b is None
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+
+        assert event is not None
+        assert event.claimed_by == claim_a
+        assert event.claim_expires_at is not None
+        assert event.claim_expires_at > now
+
+# #756
+def test_outbox_expired_claim_can_be_reclaimed():
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-756",
+        )
+        event_id = event.id
+
+    first_now = utcnow_naive()
+
+    with SessionLocal() as db_a:
+        claim_a = _claim_outbox_event(
+            db_a,
+            event_id=event_id,
+            now=first_now,
+            lease_seconds=1,
+        )
+
+    reclaim_now = first_now + timedelta(seconds=2)
+
+    with SessionLocal() as db_b:
+        claim_b = _claim_outbox_event(
+            db_b,
+            event_id=event_id,
+            now=reclaim_now,
+            lease_seconds=60,
+        )
+
+    assert claim_a is not None
+    assert claim_b is not None
+    assert claim_b != claim_a
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+
+        assert event is not None
+        assert event.claimed_by == claim_b
+        assert event.claim_expires_at is not None
+        assert event.claim_expires_at > reclaim_now
+
+# #757
+def test_outbox_worker_skips_event_with_active_claim(monkeypatch):
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-757",
+        )
+        event_id = event.id
+        event.claimed_by = "other-worker"
+        event.claim_expires_at = utcnow_naive() + timedelta(minutes=5)
+        setup_db.commit()
+
+    post_calls = []
+
+    def fake_post(*args, **kwargs):
+        post_calls.append((args, kwargs))
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr("app.outbox_worker.requests.post", fake_post)
+
+    with SessionLocal() as db:
+        count = deliver_pending_events(db)
+
+    assert count == 0
+    assert post_calls == []
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+        assert event is not None
+        assert event.delivered is False
+        assert event.claimed_by == "other-worker"
+
+
+# #758
+def test_outbox_worker_processes_event_after_claim_expires():
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-758",
+            event_type="no.subscription",
+        )
+        event_id = event.id
+        event.claimed_by = "dead-worker"
+        event.claim_expires_at = utcnow_naive() - timedelta(seconds=1)
+        setup_db.commit()
+
+    with SessionLocal() as db:
+        count = deliver_pending_events(db)
+
+    assert count == 1
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+        assert event is not None
+        assert event.delivered is True
+        assert event.claimed_by is None
+        assert event.claim_expires_at is None
+
+
+# #759
+def test_outbox_success_releases_claim(monkeypatch):
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-759",
+        )
+        event_id = event.id
+        _make_outbox_subscription(
+            setup_db,
+            tenant_id="outbox-759",
+            target_url="https://example.test/webhook",
+        )
+        
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(200),
+    )
+
+    with SessionLocal() as db:
+        count = deliver_pending_events(db)
+
+    assert count == 1
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+        assert event is not None
+        assert event.delivered is True
+        assert event.claimed_by is None
+        assert event.claim_expires_at is None
+
+
+# #760
+def test_outbox_retry_failure_releases_claim(monkeypatch):
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-760",
+        )
+        event_id = event.id
+        _make_outbox_subscription(
+            setup_db,
+            tenant_id="outbox-760",
+            target_url="https://example.test/webhook",
+        )
+
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(500),
+    )
+
+    with SessionLocal() as db:
+        count = deliver_pending_events(db)
+
+    assert count == 0
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+        assert event is not None
+        assert event.delivered is False
+        assert event.dead_lettered is False
+        assert event.claimed_by is None
+        assert event.claim_expires_at is None
+
+
+# #761
+def test_outbox_dead_letter_releases_claim(monkeypatch):
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-761",
+        )
+        event_id = event.id
+        event.attempts = settings.webhook_max_attempts - 1
+        _make_outbox_subscription(
+            setup_db,
+            tenant_id="outbox-761",
+            target_url="https://example.test/webhook",
+        )
+        setup_db.commit()
+
+    _patch_outbox_secret(monkeypatch)
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(500),
+    )
+
+    with SessionLocal() as db:
+        count = deliver_pending_events(db)
+
+    assert count == 0
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+        assert event is not None
+        assert event.dead_lettered is True
+        assert event.claimed_by is None
+        assert event.claim_expires_at is None
+
+
+# #762
+def test_outbox_no_subscription_releases_claim():
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-762",
+            event_type="no.subscription",
+        )
+        event_id = event.id
+
+    with SessionLocal() as db:
+        count = deliver_pending_events(db)
+
+    assert count == 1
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+        assert event is not None
+        assert event.delivered is True
+        assert event.claimed_by is None
+        assert event.claim_expires_at is None
+
+
+# #763
+def test_outbox_failed_claim_does_not_increment_attempts():
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-763",
+        )
+        event_id = event.id
+        event.claimed_by = "other-worker"
+        event.claim_expires_at = utcnow_naive() + timedelta(minutes=5)
+        setup_db.commit()
+
+    with SessionLocal() as db:
+        count = deliver_pending_events(db)
+
+    assert count == 0
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+        assert event is not None
+        assert event.attempts == 0
+        assert event.delivered is False
+
+
+# #764
+def test_outbox_expired_claim_is_replaced_with_new_token():
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-764",
+        )
+        event_id = event.id
+        event.claimed_by = "expired-token"
+        event.claim_expires_at = utcnow_naive() - timedelta(seconds=1)
+        setup_db.commit()
+
+    with SessionLocal() as db:
+        new_token = _claim_outbox_event(
+            db,
+            event_id=event_id,
+            now=utcnow_naive(),
+            lease_seconds=60,
+        )
+
+    assert new_token is not None
+    assert new_token != "expired-token"
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+        assert event is not None
+        assert event.claimed_by == new_token
+
+
+# #765
+def test_outbox_claim_cannot_take_delivered_event():
+    with SessionLocal() as setup_db:
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-765",
+        )
+        event_id = event.id
+        event.delivered = True
+        event.delivered_at = utcnow_naive()
+        setup_db.commit()
+
+    with SessionLocal() as db:
+        claim = _claim_outbox_event(
+            db,
+            event_id=event_id,
+            now=utcnow_naive(),
+            lease_seconds=60,
+        )
+
+    assert claim is None
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+        assert event is not None
+        assert event.delivered is True
+        assert event.claimed_by is None
+        assert event.claim_expires_at is None
