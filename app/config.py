@@ -121,6 +121,38 @@ class Settings(BaseSettings):
                 "METRICS_API_KEY must be set when Prometheus metrics are enabled in production"
             )
 
+        trusted_hosts = [
+            host.strip()
+            for host in self.trusted_hosts.split(",")
+            if host.strip()
+        ]
+
+        if not trusted_hosts:
+            raise ValueError(
+                "TRUSTED_HOSTS must contain at least one explicit host in production"
+            )
+
+        if "*" in trusted_hosts:
+            raise ValueError(
+                "TRUSTED_HOSTS wildcard is not allowed in production"
+            )
+
+        forwarded_allow_ips = [
+            value.strip()
+            for value in self.forwarded_allow_ips.split(",")
+            if value.strip()
+        ]
+
+        if not forwarded_allow_ips:
+            raise ValueError(
+                "FORWARDED_ALLOW_IPS must contain at least one trusted proxy in production"
+            )
+
+        if "*" in forwarded_allow_ips:
+            raise ValueError(
+                "FORWARDED_ALLOW_IPS wildcard is not allowed in production"
+            )
+
         return self
 
     model_config = SettingsConfigDict(

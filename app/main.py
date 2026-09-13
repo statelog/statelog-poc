@@ -347,8 +347,13 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    if settings.environment.lower() == "prod":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    if (
+        settings.environment.lower() == "prod"
+        and request.url.scheme == "https"
+    ):
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
     return response
 
 
@@ -479,15 +484,38 @@ def healthz() -> dict:
 
 
 @app.get("/readyz")
-def readyz(db: Session = Depends(get_db)) -> dict:
-    db.execute(select(Tenant).limit(1))
+def readyz(db: Session = Depends(get_db)):
+    database_ok = True
+
+    try:
+        db.execute(select(Tenant).limit(1))
+    except SQLAlchemyError:
+        database_ok = False
+
     redis_ok = False
     if redis_client:
         try:
             redis_ok = bool(redis_client.ping())
         except RedisError:
             redis_ok = False
-    return {"status": "ready", "redis": redis_ok, "database": True}
+
+    readiness = {
+        "status": (
+            "ready"
+            if database_ok and redis_ok
+            else "not_ready"
+        ),
+        "redis": redis_ok,
+        "database": database_ok,
+    }
+
+    if not database_ok or not redis_ok:
+        return JSONResponse(
+            status_code=503,
+            content=readiness,
+        )
+
+    return readiness
 
 
 @app.get("/metrics")

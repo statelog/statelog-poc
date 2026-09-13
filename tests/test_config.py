@@ -107,3 +107,59 @@ def test_non_production_allows_development_jwt_secret():
     )
 
     assert settings.environment == "test"
+
+def test_production_accepts_explicit_trusted_hosts():
+    settings = production_settings(
+        TRUSTED_HOSTS="api.example.com,admin.example.com",
+    )
+
+    assert settings.trusted_hosts == "api.example.com,admin.example.com"
+
+
+def test_production_rejects_empty_trusted_hosts():
+    with pytest.raises(
+        ValidationError,
+        match="TRUSTED_HOSTS must contain at least one explicit host in production",
+    ):
+        production_settings(
+            TRUSTED_HOSTS="",
+        )
+
+
+def test_production_rejects_whitespace_only_trusted_hosts():
+    with pytest.raises(
+        ValidationError,
+        match="TRUSTED_HOSTS must contain at least one explicit host in production",
+    ):
+        production_settings(
+            TRUSTED_HOSTS="   ,   ",
+        )
+
+
+def test_production_rejects_trusted_hosts_wildcard():
+    with pytest.raises(
+        ValidationError,
+        match="TRUSTED_HOSTS wildcard is not allowed in production",
+    ):
+        production_settings(
+            TRUSTED_HOSTS="*",
+        )
+
+
+def test_production_rejects_trusted_hosts_with_empty_entries_only():
+    with pytest.raises(
+        ValidationError,
+        match="TRUSTED_HOSTS must contain at least one explicit host in production",
+    ):
+        production_settings(
+            TRUSTED_HOSTS=",,,",
+        )
+
+
+def test_non_production_allows_trusted_hosts_wildcard():
+    settings = Settings(
+        ENVIRONMENT="test",
+        TRUSTED_HOSTS="*",
+    )
+
+    assert settings.trusted_hosts == "*"

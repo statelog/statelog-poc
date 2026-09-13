@@ -7,8 +7,10 @@ services:
       - .env
     entrypoint: ["/app/deploy/docker-entrypoint.sh"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
+      app:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -36,6 +38,8 @@ services:
       - .env
     entrypoint: ["/app/deploy/worker-entrypoint.sh"]
     depends_on:
+      app:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
