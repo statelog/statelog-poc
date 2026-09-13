@@ -49,20 +49,91 @@ def get_active_signing_key() -> tuple[str, str]:
     return active_kid, keyring[active_kid]
 
 
-def _fernet() -> Fernet:
-    key_material = hashlib.sha256(settings.secret_encryption_key.encode('utf-8')).digest()
-    return Fernet(base64.urlsafe_b64encode(key_material))
+def get_secret_encryption_keyring() -> dict[str, str]:
+    if settings.secret_encryption_keyring_json.strip():
+        parsed = json.loads(settings.secret_encryption_keyring_json)
+
+        if not isinstance(parsed, dict) or not parsed:
+            raise ValueError(
+                "SECRET_ENCRYPTION_KEYRING_JSON must be a non-empty JSON object"
+            )
+
+        return {
+            str(k): str(v)
+            for k, v in parsed.items()
+        }
+
+    return {
+        settings.secret_encryption_active_kid:
+            settings.secret_encryption_key
+    }
+
+
+def get_active_secret_encryption_key() -> tuple[str, str]:
+    keyring = get_secret_encryption_keyring()
+    active_kid = settings.secret_encryption_active_kid
+
+    if active_kid not in keyring:
+        raise ValueError(
+            "Secret encryption active kid missing from keyring"
+        )
+
+    return active_kid, keyring[active_kid]
+
+
+def _fernet_for_key(secret_key: str) -> Fernet:
+    key_material = hashlib.sha256(
+        secret_key.encode("utf-8")
+    ).digest()
+
+    return Fernet(
+        base64.urlsafe_b64encode(key_material)
+    )
 
 
 def encrypt_secret(value: str) -> str:
-    return _fernet().encrypt(value.encode('utf-8')).decode('utf-8')
+    _, encryption_key = get_active_secret_encryption_key()
+
+    return (
+        _fernet_for_key(encryption_key)
+        .encrypt(value.encode("utf-8"))
+        .decode("utf-8")
+    )
 
 
-def decrypt_secret(value: str) -> str:
-    try:
-        return _fernet().decrypt(value.encode('utf-8')).decode('utf-8')
-    except InvalidToken as exc:
-        raise ValueError('secret_decryption_failed') from exc
+def decrypt_secret(
+    value: str,
+    *,
+    key_version: str | None = None,
+) -> str:
+    keyring = get_secret_encryption_keyring()
+
+    candidate_keys: list[str] = []
+
+    if key_version and key_version in keyring:
+        candidate_keys.append(keyring[key_version])
+
+    candidate_keys.extend(
+        encryption_key
+        for kid, encryption_key in keyring.items()
+        if not (
+            key_version
+            and key_version in keyring
+            and kid == key_version
+        )
+    )
+
+    for encryption_key in candidate_keys:
+        try:
+            return (
+                _fernet_for_key(encryption_key)
+                .decrypt(value.encode("utf-8"))
+                .decode("utf-8")
+            )
+        except InvalidToken:
+            continue
+
+    raise ValueError("secret_decryption_failed")
 
 
 def issue_access_token(*, tenant_id: str, right_id: str, user_id: str, device_id: str, scope: str) -> str:

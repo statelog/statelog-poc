@@ -261,7 +261,10 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
             try:
                 _validate_webhook_target_url(sub.target_url)
 
-                secret = decrypt_secret(sub.signing_secret_encrypted)
+                secret = decrypt_secret(
+                    sub.signing_secret_encrypted,
+                    key_version=sub.signing_secret_key_version,
+                )
                 signature = sign_webhook_payload(
                     secret=secret,
                     payload=payload,

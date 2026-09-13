@@ -18,6 +18,14 @@ class Settings(BaseSettings):
         alias="JWT_AUDIENCE",
     )
     secret_encryption_key: str = Field(default="dev-secret-encryption-key", alias="SECRET_ENCRYPTION_KEY")
+    secret_encryption_active_kid: str = Field(
+        default="v1",
+        alias="SECRET_ENCRYPTION_ACTIVE_KID",
+    )
+    secret_encryption_keyring_json: str = Field(
+        default="",
+        alias="SECRET_ENCRYPTION_KEYRING_JSON",
+    )
     access_token_ttl_seconds: int = 300
     api_key_header: str = "X-API-Key"
     client_id_header: str = "X-Client-Id"
@@ -64,7 +72,6 @@ class Settings(BaseSettings):
 
         checks = {
             "ADMIN_API_KEY": self.admin_api_key,
-            "SECRET_ENCRYPTION_KEY": self.secret_encryption_key,
             "IP_HASH_PEPPER": self.ip_hash_pepper,
             "WEBHOOK_SECRET_PEPPER": self.webhook_secret_pepper,
         }
@@ -110,6 +117,54 @@ class Settings(BaseSettings):
             ):
                 raise ValueError(
                     "JWT_KEYRING_JSON or JWT_SECRET must contain a strong production signing secret"
+                )
+
+        if self.secret_encryption_keyring_json:
+            try:
+                secret_encryption_keyring = json.loads(
+                    self.secret_encryption_keyring_json
+                )
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "SECRET_ENCRYPTION_KEYRING_JSON must be a valid JSON object"
+                ) from exc
+
+            if (
+                not isinstance(secret_encryption_keyring, dict)
+                or not secret_encryption_keyring
+            ):
+                raise ValueError(
+                    "SECRET_ENCRYPTION_KEYRING_JSON must be a non-empty JSON object"
+                )
+
+            if (
+                self.secret_encryption_active_kid
+                not in secret_encryption_keyring
+            ):
+                raise ValueError(
+                    "Secret encryption active kid missing from keyring"
+                )
+
+            for kid, encryption_key in secret_encryption_keyring.items():
+                if (
+                    not isinstance(kid, str)
+                    or not kid.strip()
+                    or not isinstance(encryption_key, str)
+                    or encryption_key in weak_values
+                    or len(encryption_key.encode("utf-8")) < 24
+                ):
+                    raise ValueError(
+                        "Secret encryption keyring keys must be strong production secrets"
+                    )
+        else:
+            if (
+                not self.secret_encryption_key
+                or self.secret_encryption_key in weak_values
+                or len(self.secret_encryption_key.encode("utf-8")) < 24
+            ):
+                raise ValueError(
+                    "SECRET_ENCRYPTION_KEYRING_JSON or SECRET_ENCRYPTION_KEY "
+                    "must contain a strong production encryption secret"
                 )
 
         if "postgres:postgres" in self.database_url:

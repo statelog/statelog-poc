@@ -108,6 +108,62 @@ def test_non_production_allows_development_jwt_secret():
 
     assert settings.environment == "test"
 
+def test_production_accepts_strong_secret_encryption_keyring():
+    settings = production_settings(
+        SECRET_ENCRYPTION_KEYRING_JSON=json.dumps(
+            {
+                "v1": STRONG_SECRET,
+                "v2": STRONG_SECRET_2,
+            }
+        ),
+        SECRET_ENCRYPTION_ACTIVE_KID="v2",
+    )
+
+    assert settings.secret_encryption_active_kid == "v2"
+
+def test_production_secret_encryption_keyring_does_not_require_legacy_key():
+    settings = production_settings(
+        SECRET_ENCRYPTION_KEY="",
+        SECRET_ENCRYPTION_KEYRING_JSON=json.dumps(
+            {
+                "v1": STRONG_SECRET,
+                "v2": STRONG_SECRET_2,
+            }
+        ),
+        SECRET_ENCRYPTION_ACTIVE_KID="v2",
+    )
+
+    assert settings.secret_encryption_active_kid == "v2"
+
+def test_production_rejects_empty_secret_encryption_keyring_object():
+    with pytest.raises(ValidationError):
+        production_settings(
+            SECRET_ENCRYPTION_KEYRING_JSON="{}",
+        )
+
+def test_production_rejects_missing_active_secret_encryption_kid():
+    with pytest.raises(ValidationError):
+        production_settings(
+            SECRET_ENCRYPTION_KEYRING_JSON=json.dumps(
+                {
+                    "legacy": STRONG_SECRET,
+                }
+            ),
+            SECRET_ENCRYPTION_ACTIVE_KID="v2",
+        )
+
+
+def test_production_rejects_weak_key_in_secret_encryption_keyring():
+    with pytest.raises(ValidationError):
+        production_settings(
+            SECRET_ENCRYPTION_KEYRING_JSON=json.dumps(
+                {
+                    "v1": STRONG_SECRET,
+                    "v2": "short",
+                }
+            ),
+        )
+
 def test_production_accepts_explicit_trusted_hosts():
     settings = production_settings(
         TRUSTED_HOSTS="api.example.com,admin.example.com",
@@ -163,3 +219,27 @@ def test_non_production_allows_trusted_hosts_wildcard():
     )
 
     assert settings.trusted_hosts == "*"
+
+def test_production_rejects_malformed_secret_encryption_keyring_json():
+    with pytest.raises(
+        ValidationError,
+        match="SECRET_ENCRYPTION_KEYRING_JSON must be a valid JSON object",
+    ):
+        production_settings(
+            SECRET_ENCRYPTION_KEYRING_JSON="{not-json",
+        )
+
+
+def test_production_rejects_non_object_secret_encryption_keyring():
+    with pytest.raises(
+        ValidationError,
+        match="SECRET_ENCRYPTION_KEYRING_JSON must be a non-empty JSON object",
+    ):
+        production_settings(
+            SECRET_ENCRYPTION_KEYRING_JSON=json.dumps(
+                [
+                    STRONG_SECRET,
+                    STRONG_SECRET_2,
+                ]
+            ),
+        )

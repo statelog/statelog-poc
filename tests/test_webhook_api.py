@@ -3,6 +3,7 @@ import pytest
 from tests.test_smoke import HEADERS, ensure_setup
 
 from app.config import settings
+import app.security as security_module
 from app.database import SessionLocal
 from app.models import WebhookSubscription
 from app.security import decrypt_secret, hash_with_pepper
@@ -200,6 +201,41 @@ def test_webhook_subscription_encrypts_and_hashes_secret(client):
             secret,
             settings.webhook_secret_pepper,
         )
+
+def test_webhook_subscription_records_secret_encryption_key_version(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "enc-v7",
+    )
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_keyring_json",
+        "",
+    )
+
+    response = client.post(
+        "/webhooks/subscriptions",
+        headers=HEADERS,
+        json=webhook_payload(
+            signing_secret="webhook-encryption-version-test",
+        ),
+    )
+
+    assert response.status_code == 200
+    subscription_id = response.json()["subscription_id"]
+
+    with SessionLocal() as db:
+        subscription = db.get(
+            WebhookSubscription,
+            subscription_id,
+        )
+
+        assert subscription is not None
+        assert subscription.signing_secret_key_version == "enc-v7"
 
 # #785
 def test_webhook_subscription_returns_503_on_database_failure(

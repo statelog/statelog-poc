@@ -58,7 +58,7 @@ from .schemas import (
     WorkflowConfigUpdate,
     normalize_utc_naive,
 )
-from .security import build_request_fingerprint, constant_time_equals, decode_access_token, encrypt_secret, get_active_signing_key, hash_secret, hash_with_pepper, issue_access_token
+from .security import build_request_fingerprint, constant_time_equals, decode_access_token, encrypt_secret, get_active_secret_encryption_key, get_active_signing_key, hash_secret, hash_with_pepper, issue_access_token
 from .services.auth_service import enforce_right_owner
 from .services.decision_service import build_cache_key
 from .services.privacy_service import pseudonymize_ip
@@ -1589,14 +1589,14 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
 def create_webhook(payload: WebhookCreate, db: Session = Depends(get_db), client: ClientCredential = Depends(get_client)):
     if client.tenant_id != payload.tenant_id:
         raise HTTPException(status_code=403, detail="tenant_mismatch")
-    active_kid, _ = get_active_signing_key()
+    encryption_kid, _ = get_active_secret_encryption_key()
     sub = WebhookSubscription(
         tenant_id=payload.tenant_id,
         target_url=str(payload.target_url),
         event_type=payload.event_type,
         signing_secret_hash=hash_with_pepper(payload.signing_secret, settings.webhook_secret_pepper),
         signing_secret_encrypted=encrypt_secret(payload.signing_secret),
-        signing_secret_key_version=active_kid,
+        signing_secret_key_version=encryption_kid,
     )
     db.add(sub)
     commit_or_409(

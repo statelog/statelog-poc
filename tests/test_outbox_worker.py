@@ -505,7 +505,7 @@ def _make_outbox_subscription(
 def _patch_outbox_secret(monkeypatch):
     monkeypatch.setattr(
         "app.outbox_worker.decrypt_secret",
-        lambda value: "test-secret",
+        lambda value, *, key_version=None: "test-secret",
     )
 
 
@@ -541,6 +541,46 @@ def test_outbox_http_200_marks_event_delivered(monkeypatch):
         assert event.delivered_at is not None
         assert event.last_error is None
 
+
+def test_outbox_uses_subscription_secret_key_version_when_decrypting(
+    monkeypatch,
+):
+    captured = {}
+
+    def _decrypt_secret(value, *, key_version=None):
+        captured["value"] = value
+        captured["key_version"] = key_version
+        return "test-secret"
+
+    monkeypatch.setattr(
+        "app.outbox_worker.decrypt_secret",
+        _decrypt_secret,
+    )
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        lambda *args, **kwargs: _OutboxResponse(200),
+    )
+
+    with SessionLocal() as db:
+        subscription = _make_outbox_subscription(
+            db,
+            tenant_id="outbox-secret-key-version",
+            target_url="https://example.com/secret-key-version",
+        )
+        subscription.signing_secret_encrypted = "encrypted-secret-value"
+        subscription.signing_secret_key_version = "enc-v1"
+        db.commit()
+
+        _make_outbox_event(
+            db,
+            tenant_id="outbox-secret-key-version",
+        )
+
+        count = deliver_pending_events(db)
+
+        assert count == 1
+        assert captured["value"] == "encrypted-secret-value"
+        assert captured["key_version"] == "enc-v1"
 
 # #736
 def test_outbox_http_299_is_success(monkeypatch):

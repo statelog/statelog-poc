@@ -11,8 +11,10 @@ from app.security import (
     constant_time_equals,
     decrypt_secret,
     encrypt_secret,
+    get_active_secret_encryption_key,
     get_active_signing_key,
     get_jwt_keyring,
+    get_secret_encryption_keyring,
     hash_secret,
     hash_with_pepper,
     sign_webhook_payload,
@@ -644,3 +646,107 @@ def test_decode_access_token_rejects_wrong_audience(monkeypatch):
 
     with pytest.raises(jwt.InvalidAudienceError):
         decode_access_token(token)
+
+def test_secret_encryption_keyring_falls_back_to_legacy_secret(monkeypatch):
+    monkeypatch.setattr(settings, "secret_encryption_keyring_json", "")
+    monkeypatch.setattr(settings, "secret_encryption_active_kid", "legacy")
+    monkeypatch.setattr(
+        settings,
+        "secret_encryption_key",
+        "legacy-encryption-secret-key-2026-strong",
+    )
+
+    assert get_secret_encryption_keyring() == {
+        "legacy": "legacy-encryption-secret-key-2026-strong",
+    }
+
+
+def test_get_active_secret_encryption_key_uses_configured_keyring(monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v1": "encryption-secret-key-v1-2026-strong",
+                "v2": "encryption-secret-key-v2-2026-strong",
+            }
+        ),
+    )
+    monkeypatch.setattr(settings, "secret_encryption_active_kid", "v2")
+
+    kid, key = get_active_secret_encryption_key()
+
+    assert kid == "v2"
+    assert key == "encryption-secret-key-v2-2026-strong"
+
+
+def test_decrypt_secret_supports_old_key_after_rotation(monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v1": "encryption-secret-key-v1-2026-strong",
+            }
+        ),
+    )
+    monkeypatch.setattr(settings, "secret_encryption_active_kid", "v1")
+
+    encrypted = encrypt_secret("rotated-webhook-secret")
+
+    monkeypatch.setattr(
+        settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v1": "encryption-secret-key-v1-2026-strong",
+                "v2": "encryption-secret-key-v2-2026-strong",
+            }
+        ),
+    )
+    monkeypatch.setattr(settings, "secret_encryption_active_kid", "v2")
+
+    assert (
+        decrypt_secret(
+            encrypted,
+            key_version="v1",
+        )
+        == "rotated-webhook-secret"
+    )
+
+
+def test_decrypt_secret_falls_back_when_stored_key_version_is_wrong(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "enc-v1": "encryption-secret-key-v1-2026-strong",
+            }
+        ),
+    )
+    monkeypatch.setattr(settings, "secret_encryption_active_kid", "enc-v1")
+
+    encrypted = encrypt_secret("historically-mislabeled-secret")
+
+    monkeypatch.setattr(
+        settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "enc-v1": "encryption-secret-key-v1-2026-strong",
+                "enc-v2": "encryption-secret-key-v2-2026-strong",
+            }
+        ),
+    )
+    monkeypatch.setattr(settings, "secret_encryption_active_kid", "enc-v2")
+
+    assert (
+        decrypt_secret(
+            encrypted,
+            key_version="jwt-v2",
+        )
+        == "historically-mislabeled-secret"
+    )
