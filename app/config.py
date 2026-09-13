@@ -1,3 +1,5 @@
+import json
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -43,6 +45,7 @@ class Settings(BaseSettings):
     def validate_production_secrets(self):
         if self.environment.lower() != "prod":
             return self
+
         weak_values = {
             "dev-secret-change-me",
             "admin-dev-key",
@@ -54,24 +57,77 @@ class Settings(BaseSettings):
             "replace-with-ip-pepper",
             "replace-with-webhook-pepper",
         }
+
         checks = {
             "ADMIN_API_KEY": self.admin_api_key,
             "SECRET_ENCRYPTION_KEY": self.secret_encryption_key,
             "IP_HASH_PEPPER": self.ip_hash_pepper,
             "WEBHOOK_SECRET_PEPPER": self.webhook_secret_pepper,
         }
+
         for name, value in checks.items():
             if not value or value in weak_values or len(value) < 24:
-                raise ValueError(f"{name} must be a strong production secret")
-        if not self.jwt_keyring_json and (self.jwt_secret in weak_values or len(self.jwt_secret) < 24):
-            raise ValueError("JWT_KEYRING_JSON or JWT_SECRET must contain a strong production signing secret")
+                raise ValueError(
+                    f"{name} must be a strong production secret"
+                )
+
+        if self.jwt_keyring_json:
+            try:
+                jwt_keyring = json.loads(self.jwt_keyring_json)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "JWT_KEYRING_JSON must be a valid JSON object"
+                ) from exc
+
+            if not isinstance(jwt_keyring, dict) or not jwt_keyring:
+                raise ValueError(
+                    "JWT_KEYRING_JSON must be a non-empty JSON object"
+                )
+
+            if self.jwt_active_kid not in jwt_keyring:
+                raise ValueError(
+                    "JWT active kid missing from keyring"
+                )
+
+            for kid, signing_key in jwt_keyring.items():
+                if (
+                    not isinstance(kid, str)
+                    or not kid.strip()
+                    or not isinstance(signing_key, str)
+                    or len(signing_key.encode("utf-8")) < 32
+                ):
+                    raise ValueError(
+                        "JWT keyring signing keys must be at least 32 bytes"
+                    )
+        else:
+            if (
+                self.jwt_secret in weak_values
+                or len(self.jwt_secret.encode("utf-8")) < 32
+            ):
+                raise ValueError(
+                    "JWT_KEYRING_JSON or JWT_SECRET must contain a strong production signing secret"
+                )
+
         if "postgres:postgres" in self.database_url:
-            raise ValueError("DATABASE_URL must not use the default postgres password in production")
-        if self.prometheus_enabled and (not self.metrics_api_key or len(self.metrics_api_key) < 24):
-            raise ValueError("METRICS_API_KEY must be set when Prometheus metrics are enabled in production")
+            raise ValueError(
+                "DATABASE_URL must not use the default postgres password in production"
+            )
+
+        if self.prometheus_enabled and (
+            not self.metrics_api_key
+            or len(self.metrics_api_key) < 24
+        ):
+            raise ValueError(
+                "METRICS_API_KEY must be set when Prometheus metrics are enabled in production"
+            )
+
         return self
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
 
 settings = Settings()

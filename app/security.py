@@ -88,11 +88,50 @@ def decode_access_token(token: str) -> Dict[str, Any]:
     header = jwt.get_unverified_header(token)
     token_kid = header.get('kid')
     if token_kid and token_kid in keyring:
-        return jwt.decode(token, keyring[token_kid], algorithms=[settings.jwt_algorithm])
+        return jwt.decode(
+            token,
+            keyring[token_kid],
+            algorithms=[settings.jwt_algorithm],
+            issuer=settings.app_name,
+            options={
+                "require": [
+                    "exp",
+                    "iss",
+                    "iat",
+                    "sub",
+                    "tenant_id",
+                    "right_id",
+                    "device_id",
+                    "scope",
+                    "jti",
+                ]
+            },
+        )
+    if token_kid:
+        raise jwt.InvalidTokenError("unknown_kid")
+
     last_exc = None
     for signing_key in keyring.values():
         try:
-            return jwt.decode(token, signing_key, algorithms=[settings.jwt_algorithm])
+            return jwt.decode(
+                token,
+                signing_key,
+                algorithms=[settings.jwt_algorithm],
+                issuer=settings.app_name,
+                options={
+                    "require": [
+                        "exp",
+                        "iss",
+                        "iat",
+                        "sub",
+                        "tenant_id",
+                        "right_id",
+                        "device_id",
+                        "scope",
+                        "jti",
+                   ]
+                },
+            )
         except jwt.InvalidTokenError as exc:
             last_exc = exc
     if last_exc:

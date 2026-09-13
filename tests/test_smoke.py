@@ -1,3 +1,4 @@
+import jwt
 import pytest
 from fastapi import HTTPException
 from redis.exceptions import RedisError
@@ -688,6 +689,92 @@ def test_invalid_token_returns_401(client):
     invalid_token = token + "X"
 
     response = access_request(client, invalid_token)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_token"
+
+def _resign_access_token(token, *, payload_update=None, remove_claim=None, header_kid=None):
+    from app.security import get_active_signing_key
+
+    payload = jwt.decode(
+        token,
+        options={
+            "verify_signature": False,
+            "verify_exp": False,
+        },
+        algorithms=[settings.jwt_algorithm],
+    )
+
+    if payload_update:
+        payload.update(payload_update)
+
+    if remove_claim:
+        payload.pop(remove_claim, None)
+
+    kid, signing_key = get_active_signing_key()
+
+    return jwt.encode(
+        payload,
+        signing_key,
+        algorithm=settings.jwt_algorithm,
+        headers={"kid": header_kid if header_kid is not None else kid},
+    )
+
+
+def test_access_rejects_token_with_wrong_issuer(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    token = _resign_access_token(
+        token,
+        payload_update={"iss": "evil-issuer"},
+    )
+
+    response = access_request(client, token)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_token"
+
+def test_access_rejects_token_missing_tenant_id(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    token = _resign_access_token(
+        token,
+        remove_claim="tenant_id",
+    )
+
+    response = access_request(client, token)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_token"
+
+
+def test_access_rejects_token_with_unknown_kid(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    token = _resign_access_token(
+        token,
+        header_kid="unknown",
+    )
+
+    response = access_request(client, token)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_token"
+
+
+def test_access_rejects_token_missing_jti(client):
+    ensure_setup(client)
+
+    token = issue_token(client).json()["token"]
+    token = _resign_access_token(
+        token,
+        remove_claim="jti",
+    )
+
+    response = access_request(client, token)
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_token"
