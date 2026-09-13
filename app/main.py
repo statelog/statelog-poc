@@ -35,6 +35,7 @@ from .metrics import (
     REQUEST_COUNTER,
     RISK_SCORE_HISTOGRAM,
     metrics_response,
+    METRICS_DATABASE_AVAILABLE_GAUGE,
 )
 from .models import AccessRight, ClientCredential, Device, OutboxEvent, RequestLog, Tenant, WebhookDeliveryAttempt, WebhookSubscription, PolicyRecord, PolicyHistory, WorkflowConfigRecord, WorkflowConfigHistory
 from .rate_limit import HybridRateLimiter
@@ -531,23 +532,29 @@ def metrics_endpoint(
         ):
             raise HTTPException(status_code=401, detail="invalid_metrics_key")
 
-    pending_count = db.scalar(
-        select(func.count())
-        .select_from(OutboxEvent)
-        .where(
-            OutboxEvent.delivered.is_(False),
-            OutboxEvent.dead_lettered.is_(False),
+    try:
+        pending_count = db.scalar(
+            select(func.count())
+            .select_from(OutboxEvent)
+            .where(
+                OutboxEvent.delivered.is_(False),
+                OutboxEvent.dead_lettered.is_(False),
+            )
         )
-    )
 
-    dead_letter_count = db.scalar(
-        select(func.count())
-        .select_from(OutboxEvent)
-        .where(OutboxEvent.dead_lettered.is_(True))
-    )
+        dead_letter_count = db.scalar(
+            select(func.count())
+            .select_from(OutboxEvent)
+            .where(OutboxEvent.dead_lettered.is_(True))
+        )
 
-    OUTBOX_PENDING_GAUGE.set(pending_count or 0)
-    OUTBOX_DEAD_LETTER_GAUGE.set(dead_letter_count or 0)
+    except SQLAlchemyError:
+        METRICS_DATABASE_AVAILABLE_GAUGE.set(0)
+
+    else:
+        OUTBOX_PENDING_GAUGE.set(pending_count or 0)
+        OUTBOX_DEAD_LETTER_GAUGE.set(dead_letter_count or 0)
+        METRICS_DATABASE_AVAILABLE_GAUGE.set(1)
 
     return metrics_response()
 

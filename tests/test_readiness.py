@@ -404,3 +404,82 @@ def test_wait_for_redis_timeout_reports_last_error(monkeypatch):
         match="final-redis-error",
     ):
         wait_for_redis(max_wait=1)
+
+
+def test_metrics_returns_200_when_database_query_fails(client):
+    from app.main import get_db
+
+    class FailingSession:
+        def scalar(self, statement):
+            raise SQLAlchemyError("database unavailable")
+
+    def override_get_db():
+        yield FailingSession()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        response = client.get("/metrics")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+
+
+def test_metrics_marks_database_scrape_unavailable_on_db_failure(client):
+    from app.main import get_db
+
+    class FailingSession:
+        def scalar(self, statement):
+            raise SQLAlchemyError("database unavailable")
+
+    def override_get_db():
+        yield FailingSession()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        response = client.get("/metrics")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    assert "metrics_database_available 0.0" in response.text
+
+
+def test_metrics_marks_database_scrape_available_when_queries_succeed(client):
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "metrics_database_available 1.0" in response.text
+
+
+def test_metrics_does_not_publish_partial_db_refresh_when_second_query_fails(
+    client,
+):
+    from app.main import get_db
+
+    class PartiallyFailingSession:
+        def __init__(self):
+            self.calls = 0
+
+        def scalar(self, statement):
+            self.calls += 1
+
+            if self.calls == 1:
+                return 7
+
+            raise SQLAlchemyError("database unavailable")
+
+    def override_get_db():
+        yield PartiallyFailingSession()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        response = client.get("/metrics")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    assert "metrics_database_available 0.0" in response.text

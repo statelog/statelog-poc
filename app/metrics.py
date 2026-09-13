@@ -38,6 +38,10 @@ OUTBOX_DEAD_LETTER_GAUGE = Gauge(
     "outbox_dead_letter_events",
     "Outbox events moved to the dead-letter state",
 )
+METRICS_DATABASE_AVAILABLE_GAUGE = Gauge(
+    "metrics_database_available",
+    "Whether database-backed metrics were refreshed successfully",
+)
 
 
 def metrics_response() -> Response:
