@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_active_kid: str = Field(default="v1", alias="JWT_ACTIVE_KID")
     jwt_keyring_json: str = Field(default="", alias="JWT_KEYRING_JSON")
+    jwt_audience: str = Field(
+        default="statelog-access",
+        alias="JWT_AUDIENCE",
+    )
     secret_encryption_key: str = Field(default="dev-secret-encryption-key", alias="SECRET_ENCRYPTION_KEY")
     access_token_ttl_seconds: int = 300
     api_key_header: str = "X-API-Key"

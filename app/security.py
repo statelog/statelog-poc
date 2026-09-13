@@ -69,6 +69,7 @@ def issue_access_token(*, tenant_id: str, right_id: str, user_id: str, device_id
     kid, signing_key = get_active_signing_key()
     payload: Dict[str, Any] = {
         'iss': settings.app_name,
+        'aud': settings.jwt_audience,
         'sub': user_id,
         'tenant_id': tenant_id,
         'right_id': right_id,
@@ -93,10 +94,12 @@ def decode_access_token(token: str) -> Dict[str, Any]:
             keyring[token_kid],
             algorithms=[settings.jwt_algorithm],
             issuer=settings.app_name,
+            audience=settings.jwt_audience,
             options={
                 "require": [
                     "exp",
                     "iss",
+                    "aud",
                     "iat",
                     "sub",
                     "tenant_id",
@@ -118,10 +121,12 @@ def decode_access_token(token: str) -> Dict[str, Any]:
                 signing_key,
                 algorithms=[settings.jwt_algorithm],
                 issuer=settings.app_name,
+                audience=settings.jwt_audience,
                 options={
                     "require": [
                         "exp",
                         "iss",
+                        "aud",
                         "iat",
                         "sub",
                         "tenant_id",

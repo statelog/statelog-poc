@@ -17,6 +17,7 @@ from app.security import (
     hash_with_pepper,
     sign_webhook_payload,
     decode_access_token,
+    issue_access_token,
 )
 
 
@@ -303,6 +304,7 @@ def test_decode_access_token_rejects_missing_exp(monkeypatch):
     token = jwt.encode(
         {
             "iss": settings.app_name,
+            "aud": settings.jwt_audience,
             "sub": "user-123",
             "tenant_id": "tenant-demo",
             "right_id": "right-001",
@@ -339,6 +341,7 @@ def test_decode_access_token_rejects_wrong_issuer(monkeypatch):
     token = jwt.encode(
         {
             "iss": "evil-issuer",
+            "aud": settings.jwt_audience,
             "sub": "user-123",
             "tenant_id": "tenant-demo",
             "right_id": "right-001",
@@ -450,6 +453,7 @@ def test_decode_access_token_rejects_missing_required_claim(
 def _jwt_rotation_payload():
     return {
         "iss": settings.app_name,
+        "aud": settings.jwt_audience,
         "sub": "user-123",
         "tenant_id": "tenant-demo",
         "right_id": "right-001",
@@ -558,4 +562,85 @@ def test_decode_access_token_rejects_signature_from_wrong_key(monkeypatch):
     )
 
     with pytest.raises(jwt.InvalidSignatureError):
+        decode_access_token(token)
+
+def test_issue_access_token_includes_expected_audience(monkeypatch):
+    monkeypatch.setattr(settings, "jwt_audience", "statelog-access")
+
+    token = issue_access_token(
+        tenant_id="tenant-demo",
+        right_id="right-001",
+        user_id="user-123",
+        device_id="gate-A1",
+        scope="access",
+    )
+
+    payload = jwt.decode(
+        token,
+        options={
+            "verify_signature": False,
+            "verify_exp": False,
+            "verify_aud": False,
+        },
+        algorithms=[settings.jwt_algorithm],
+    )
+
+    assert payload["aud"] == "statelog-access"
+
+
+def test_decode_access_token_rejects_missing_audience(monkeypatch):
+    signing_key = "jwt-audience-test-secret-key-2026-strong"
+
+    monkeypatch.setattr(
+        settings,
+        "jwt_keyring_json",
+        json.dumps(
+            {
+                "v1": signing_key,
+            }
+        ),
+    )
+    monkeypatch.setattr(settings, "jwt_active_kid", "v1")
+    monkeypatch.setattr(settings, "jwt_audience", "statelog-access")
+
+    payload = _jwt_rotation_payload()
+    payload.pop("aud")
+
+    token = jwt.encode(
+        payload,
+        signing_key,
+        algorithm=settings.jwt_algorithm,
+        headers={"kid": "v1"},
+    )
+
+    with pytest.raises(jwt.MissingRequiredClaimError):
+        decode_access_token(token)
+
+
+def test_decode_access_token_rejects_wrong_audience(monkeypatch):
+    signing_key = "jwt-audience-test-secret-key-2026-strong"
+
+    monkeypatch.setattr(
+        settings,
+        "jwt_keyring_json",
+        json.dumps(
+            {
+                "v1": signing_key,
+            }
+        ),
+    )
+    monkeypatch.setattr(settings, "jwt_active_kid", "v1")
+    monkeypatch.setattr(settings, "jwt_audience", "statelog-access")
+
+    payload = _jwt_rotation_payload()
+    payload["aud"] = "different-service"
+
+    token = jwt.encode(
+        payload,
+        signing_key,
+        algorithm=settings.jwt_algorithm,
+        headers={"kid": "v1"},
+    )
+
+    with pytest.raises(jwt.InvalidAudienceError):
         decode_access_token(token)
