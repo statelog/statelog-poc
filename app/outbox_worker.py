@@ -130,6 +130,32 @@ def _release_outbox_claim(
     db.commit()
     return result.rowcount == 1
 
+def _fence_outbox_claim(
+    db: Session,
+    *,
+    event_id: int,
+    claim_token: str,
+    now,
+) -> bool:
+    result = db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == event_id,
+            OutboxEvent.claimed_by == claim_token,
+            OutboxEvent.claim_expires_at.is_not(None),
+            OutboxEvent.claim_expires_at > now,
+        )
+        .values(
+            claimed_by=claim_token,
+        )
+        .execution_options(
+            synchronize_session=False,
+            autoflush=False,
+        )
+    )
+
+    return result.rowcount == 1
+
 def _already_delivered(db: Session, *, event_id: int, subscription_id: int) -> bool:
     successful = db.scalar(
         select(func.count())
@@ -216,6 +242,15 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
         )
 
         if not subs:
+            if not _fence_outbox_claim(
+                db,
+                event_id=event.id,
+                claim_token=claim_token,
+                now=utcnow_naive(),
+            ):
+                db.rollback()
+                continue
+
             event.delivered = True
             event.delivered_at = utcnow_naive()
             event.claimed_by = None
@@ -231,6 +266,9 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
                     claim_token=claim_token,
                 )
                 raise
+
+            delivered_count += 1
+            continue
 
         try:
             payload = json.loads(event.payload)
@@ -330,6 +368,15 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
                         claim_token=claim_token,
                     )
                     raise
+
+        if not _fence_outbox_claim(
+            db,
+            event_id=event.id,
+            claim_token=claim_token,
+            now=utcnow_naive(),
+        ):
+            db.rollback()
+            continue
 
         if delivery_failed:
             if event.attempts >= settings.webhook_max_attempts:

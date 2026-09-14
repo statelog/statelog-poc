@@ -1,6 +1,7 @@
 import json
 import pytest
 from datetime import timedelta
+from sqlalchemy import select
 
 from app.config import settings
 from app.database import SessionLocal
@@ -2239,3 +2240,61 @@ def test_outbox_release_claim_cannot_release_another_workers_claim():
         assert event is not None
         assert event.claimed_by == claim_token
         assert event.claim_expires_at is not None
+
+def test_outbox_stale_owner_cannot_finalize_after_claim_is_replaced(
+    monkeypatch,
+):
+    with SessionLocal() as setup_db:
+        _make_outbox_subscription(
+            setup_db,
+            tenant_id="outbox-stale-owner",
+            target_url="https://example.test/webhook",
+        )
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-stale-owner",
+        )
+        event_id = event.id
+
+    _patch_outbox_secret(monkeypatch)
+
+    def replace_claim_during_delivery(*args, **kwargs):
+        with SessionLocal() as competing_db:
+            event = competing_db.get(OutboxEvent, event_id)
+            assert event is not None
+
+            event.claimed_by = "new-worker-token"
+            event.claim_expires_at = (
+                utcnow_naive() + timedelta(seconds=60)
+            )
+            competing_db.commit()
+
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        replace_claim_during_delivery,
+    )
+
+    with SessionLocal() as db:
+        delivered = deliver_pending_events(db)
+
+    assert delivered == 0
+
+    with SessionLocal() as verify_db:
+        event = verify_db.get(OutboxEvent, event_id)
+
+        assert event is not None
+        assert event.delivered is False
+        assert event.claimed_by == "new-worker-token"
+        assert event.claim_expires_at is not None
+
+        attempts = list(
+            verify_db.scalars(
+                select(WebhookDeliveryAttempt).where(
+                    WebhookDeliveryAttempt.event_id == event_id
+                )
+            )
+        )
+
+        assert attempts == []
