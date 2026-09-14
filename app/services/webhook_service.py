@@ -118,10 +118,7 @@ def reencrypt_webhook_secrets(
                 subscription_id,
             )
 
-            if (
-                subscription is None
-                or subscription.reencrypt_claimed_by != claim_token
-            ):
+            if subscription is None:
                 continue
 
             secret, actual_kid = decrypt_secret_with_key_version(
@@ -129,14 +126,31 @@ def reencrypt_webhook_secrets(
                 key_version=subscription.signing_secret_key_version,
             )
 
-            if actual_kid != active_kid:
-                subscription.signing_secret_encrypted = encrypt_secret(secret)
-                reencrypted += 1
+            encrypted_secret = subscription.signing_secret_encrypted
 
-            subscription.signing_secret_key_version = active_kid
-            subscription.signing_secret_key_version_verified = True
-            subscription.reencrypt_claimed_by = None
-            subscription.reencrypt_claim_expires_at = None
+            if actual_kid != active_kid:
+                encrypted_secret = encrypt_secret(secret)
+
+            result = db.execute(
+                update(WebhookSubscription)
+                .where(
+                    WebhookSubscription.id == subscription_id,
+                    WebhookSubscription.reencrypt_claimed_by == claim_token,
+                )
+                .values(
+                    signing_secret_encrypted=encrypted_secret,
+                    signing_secret_key_version=active_kid,
+                    signing_secret_key_version_verified=True,
+                    reencrypt_claimed_by=None,
+                    reencrypt_claim_expires_at=None,
+                )
+            )
+
+            if result.rowcount != 1:
+                continue
+
+            if actual_kid != active_kid:
+                reencrypted += 1
 
         db.commit()
 

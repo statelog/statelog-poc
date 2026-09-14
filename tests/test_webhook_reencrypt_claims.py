@@ -533,3 +533,78 @@ def test_reencrypt_service_fills_batch_after_losing_first_claim(
         assert first.signing_secret_key_version == "v1"
         assert second.signing_secret_key_version == "v2"
         assert second.signing_secret_key_version_verified is True
+
+def test_reencrypt_stale_owner_cannot_finalize_after_claim_is_replaced(
+    monkeypatch,
+):
+    _configure_reencrypt_keys(monkeypatch)
+
+    subscription_id = _create_encrypted_subscription(
+        tenant_id="service-stale-owner",
+        secret="stale-owner-secret",
+    )
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v2",
+    )
+
+    real_decrypt = (
+        webhook_service_module.decrypt_secret_with_key_version
+    )
+
+    def _replace_claim_during_processing(
+        value,
+        *,
+        key_version=None,
+    ):
+        secret, actual_kid = real_decrypt(
+            value,
+            key_version=key_version,
+        )
+
+        with SessionLocal() as competing_db:
+            subscription = competing_db.get(
+                WebhookSubscription,
+                subscription_id,
+            )
+            subscription.reencrypt_claimed_by = "new-worker-token"
+            subscription.reencrypt_claim_expires_at = (
+                utcnow_naive() + timedelta(seconds=60)
+            )
+            competing_db.commit()
+
+        return secret, actual_kid
+
+    monkeypatch.setattr(
+        webhook_service_module,
+        "decrypt_secret_with_key_version",
+        _replace_claim_during_processing,
+    )
+
+    with SessionLocal() as db:
+        reencrypted, remaining = (
+            webhook_service_module.reencrypt_webhook_secrets(
+                db,
+                limit=1,
+            )
+        )
+
+    assert reencrypted == 0
+
+    with SessionLocal() as db:
+        subscription = db.get(
+            WebhookSubscription,
+            subscription_id,
+        )
+
+        assert subscription.signing_secret_key_version == "v1"
+        assert (
+            subscription.signing_secret_key_version_verified
+            is False
+        )
+        assert (
+            subscription.reencrypt_claimed_by
+            == "new-worker-token"
+        )
