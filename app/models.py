@@ -172,6 +172,15 @@ class WebhookSubscription(Base):
         default=False,
         nullable=False,
     )
+    reencrypt_claimed_by: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    reencrypt_claim_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+        index=True,
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 

@@ -45,6 +45,7 @@ def test_migration_files_are_present_in_expected_order():
         "0007_outbox_claim_lease.py",
         "0008_webhook_delivery_attempt_unique.py",
         "0009_webhook_secret_key_verification.py",
+        "0010_webhook_reencrypt_claim_lease.py",
     ]
 
 
@@ -1389,7 +1390,7 @@ def test_alembic_full_round_trip_returns_to_head_revision(tmp_path, monkeypatch)
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert revision == "0009_webhook_secret_key_verification"
+    assert revision == "0010_webhook_reencrypt_claim_lease"
 
 # #874
 def test_alembic_head_adds_outbox_claim_columns(tmp_path, monkeypatch):
@@ -1511,7 +1512,7 @@ def test_alembic_0007_round_trip_restores_outbox_claim_fields(
         index["name"] == "ix_outbox_events_claim_expires_at"
         for index in indexes
     )
-    assert revision == "0009_webhook_secret_key_verification"
+    assert revision == "0010_webhook_reencrypt_claim_lease"
 
 # #878
 def test_alembic_head_adds_webhook_delivery_attempt_unique_index(
@@ -1773,7 +1774,7 @@ def test_alembic_0008_round_trip_restores_unique_index(
         == "uq_webhook_delivery_attempt_event_subscription_attempt"
         for index in indexes
     )
-    assert revision == "0009_webhook_secret_key_verification"
+    assert revision == "0010_webhook_reencrypt_claim_lease"
 
 
 # #883
@@ -1796,7 +1797,7 @@ def test_alembic_head_revision_is_0009(tmp_path, monkeypatch):
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert revision == "0009_webhook_secret_key_verification"
+    assert revision == "0010_webhook_reencrypt_claim_lease"
 
 
 # #884

@@ -822,6 +822,12 @@ def test_admin_reencrypt_database_failure_rolls_back_and_returns_503(
         def scalars(self, statement):
             return self.real_db.scalars(statement)
 
+        def execute(self, statement):
+            return self.real_db.execute(statement)
+
+        def get(self, model, identity):
+            return self.real_db.get(model, identity)
+
         def commit(self):
             self.commit_calls += 1
             raise SQLAlchemyError("database_unavailable")
