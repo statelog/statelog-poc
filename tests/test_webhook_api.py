@@ -1,6 +1,7 @@
+import json
 import pytest
 
-from tests.test_smoke import HEADERS, ensure_setup
+from tests.test_smoke import ADMIN_HEADERS, HEADERS, ensure_setup
 
 from app.config import settings
 import app.security as security_module
@@ -236,6 +237,7 @@ def test_webhook_subscription_records_secret_encryption_key_version(
 
         assert subscription is not None
         assert subscription.signing_secret_key_version == "enc-v7"
+        assert subscription.signing_secret_key_version_verified is True
 
 # #785
 def test_webhook_subscription_returns_503_on_database_failure(
@@ -628,3 +630,581 @@ def test_webhook_subscription_integrity_error_is_not_exposed(client):
         "detail": "webhook_subscription_conflict",
     }
     assert "secret_constraint_details" not in response.text
+
+def test_admin_reencrypts_webhook_secret_with_active_encryption_key(
+    client,
+    monkeypatch,
+):
+    old_key = "old-webhook-encryption-key-123456"
+    new_key = "new-webhook-encryption-key-123456"
+    secret = "webhook-secret-to-reencrypt"
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v1": old_key,
+                "v2": new_key,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v1",
+    )
+
+    encrypted_with_old_key = security_module.encrypt_secret(secret)
+
+    with SessionLocal() as db:
+        subscription = WebhookSubscription(
+            tenant_id="tenant-demo",
+            target_url="https://example.com/reencrypt",
+            event_type="decision.allowed",
+            signing_secret_hash=hash_with_pepper(
+                secret,
+                settings.webhook_secret_pepper,
+            ),
+            signing_secret_encrypted=encrypted_with_old_key,
+            signing_secret_key_version="v1",
+        )
+        db.add(subscription)
+        db.commit()
+        db.refresh(subscription)
+        subscription_id = subscription.id
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v2",
+    )
+
+    response = client.post(
+        "/admin/webhooks/re-encrypt",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reencrypted"] == 1
+
+    with SessionLocal() as db:
+        subscription = db.get(
+            WebhookSubscription,
+            subscription_id,
+        )
+
+        assert subscription is not None
+        assert subscription.signing_secret_key_version == "v2"
+        assert (
+            subscription.signing_secret_encrypted
+            != encrypted_with_old_key
+        )
+        assert security_module.decrypt_secret(
+            subscription.signing_secret_encrypted,
+            key_version="v2",
+        ) == secret
+def test_admin_reencrypt_skips_subscription_already_on_active_key(
+    client,
+    monkeypatch,
+):
+    key = "active-webhook-encryption-key-123456"
+    secret = "already-active-webhook-secret"
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v2": key,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v2",
+    )
+
+    encrypted = security_module.encrypt_secret(secret)
+
+    with SessionLocal() as db:
+        subscription = WebhookSubscription(
+            tenant_id="tenant-demo",
+            target_url="https://example.com/already-active",
+            event_type="decision.allowed",
+            signing_secret_hash=hash_with_pepper(
+                secret,
+                settings.webhook_secret_pepper,
+            ),
+            signing_secret_encrypted=encrypted,
+            signing_secret_key_version="v2",
+        )
+        db.add(subscription)
+        db.commit()
+        db.refresh(subscription)
+        subscription_id = subscription.id
+
+    response = client.post(
+        "/admin/webhooks/re-encrypt",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reencrypted"] == 0
+
+    with SessionLocal() as db:
+        subscription = db.get(
+            WebhookSubscription,
+            subscription_id,
+        )
+
+        assert subscription is not None
+        assert subscription.signing_secret_key_version == "v2"
+        assert subscription.signing_secret_encrypted == encrypted
+def test_admin_reencrypt_database_failure_rolls_back_and_returns_503(
+    client,
+    monkeypatch,
+):
+    old_key = "old-webhook-encryption-key-123456"
+    new_key = "new-webhook-encryption-key-123456"
+    secret = "webhook-secret-rollback-test"
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v1": old_key,
+                "v2": new_key,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v1",
+    )
+
+    encrypted_with_old_key = security_module.encrypt_secret(secret)
+
+    with SessionLocal() as db:
+        subscription = WebhookSubscription(
+            tenant_id="tenant-demo",
+            target_url="https://example.com/reencrypt-rollback",
+            event_type="decision.allowed",
+            signing_secret_hash=hash_with_pepper(
+                secret,
+                settings.webhook_secret_pepper,
+            ),
+            signing_secret_encrypted=encrypted_with_old_key,
+            signing_secret_key_version="v1",
+        )
+        db.add(subscription)
+        db.commit()
+        db.refresh(subscription)
+        subscription_id = subscription.id
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v2",
+    )
+
+    real_db = SessionLocal()
+
+    class _FailingReencryptSession:
+        def __init__(self, real_db):
+            self.real_db = real_db
+            self.commit_calls = 0
+            self.rollback_calls = 0
+
+        def scalars(self, statement):
+            return self.real_db.scalars(statement)
+
+        def commit(self):
+            self.commit_calls += 1
+            raise SQLAlchemyError("database_unavailable")
+
+        def rollback(self):
+            self.rollback_calls += 1
+            self.real_db.rollback()
+
+    session = _FailingReencryptSession(real_db)
+
+    def failing_db():
+        try:
+            yield session
+        finally:
+            real_db.close()
+
+    client.app.dependency_overrides[get_db] = failing_db
+
+    try:
+        response = client.post(
+            "/admin/webhooks/re-encrypt",
+            headers=ADMIN_HEADERS,
+        )
+    finally:
+        client.app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "persistence_unavailable"
+    assert session.commit_calls == 1
+    assert session.rollback_calls == 1
+
+    with SessionLocal() as db:
+        subscription = db.get(
+            WebhookSubscription,
+            subscription_id,
+        )
+
+        assert subscription is not None
+        assert subscription.signing_secret_key_version == "v1"
+        assert (
+            subscription.signing_secret_encrypted
+            == encrypted_with_old_key
+        )
+
+
+def test_admin_reencrypt_requires_admin_auth(client):
+    response = client.post(
+        "/admin/webhooks/re-encrypt",
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_admin_reencrypt_undecryptable_secret_rolls_back_entire_batch(
+    client,
+    monkeypatch,
+):
+    old_key = "old-webhook-encryption-key-123456"
+    new_key = "new-webhook-encryption-key-123456"
+    valid_secret = "valid-webhook-secret"
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v1": old_key,
+                "v2": new_key,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v1",
+    )
+
+    valid_ciphertext = security_module.encrypt_secret(valid_secret)
+
+    with SessionLocal() as db:
+        valid_subscription = WebhookSubscription(
+            tenant_id="tenant-demo",
+            target_url="https://example.com/reencrypt-valid",
+            event_type="decision.allowed",
+            signing_secret_hash=hash_with_pepper(
+                valid_secret,
+                settings.webhook_secret_pepper,
+            ),
+            signing_secret_encrypted=valid_ciphertext,
+            signing_secret_key_version="v1",
+        )
+        invalid_subscription = WebhookSubscription(
+            tenant_id="tenant-demo",
+            target_url="https://example.com/reencrypt-invalid",
+            event_type="decision.allowed",
+            signing_secret_hash="unused",
+            signing_secret_encrypted="not-valid-fernet-ciphertext",
+            signing_secret_key_version="v1",
+        )
+
+        db.add(valid_subscription)
+        db.add(invalid_subscription)
+        db.commit()
+        db.refresh(valid_subscription)
+        db.refresh(invalid_subscription)
+
+        valid_subscription_id = valid_subscription.id
+        invalid_subscription_id = invalid_subscription.id
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v2",
+    )
+
+    response = client.post(
+        "/admin/webhooks/re-encrypt",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "webhook_secret_reencryption_failed"
+
+    with SessionLocal() as db:
+        valid_subscription = db.get(
+            WebhookSubscription,
+            valid_subscription_id,
+        )
+        invalid_subscription = db.get(
+            WebhookSubscription,
+            invalid_subscription_id,
+        )
+
+        assert valid_subscription is not None
+        assert invalid_subscription is not None
+
+        assert valid_subscription.signing_secret_key_version == "v1"
+        assert valid_subscription.signing_secret_encrypted == valid_ciphertext
+
+        assert invalid_subscription.signing_secret_key_version == "v1"
+        assert (
+            invalid_subscription.signing_secret_encrypted
+            == "not-valid-fernet-ciphertext"
+        )
+
+def _create_reencrypt_batch_subscriptions(
+    *,
+    count,
+    old_key,
+):
+    original_ciphertexts = {}
+
+    security_module.settings.secret_encryption_active_kid = "v1"
+
+    with SessionLocal() as db:
+        for index in range(count):
+            secret = f"batch-secret-{index}"
+            encrypted = security_module.encrypt_secret(secret)
+
+            subscription = WebhookSubscription(
+                tenant_id="tenant-demo",
+                target_url=f"https://example.com/batch-{index}",
+                event_type="decision.allowed",
+                signing_secret_hash=hash_with_pepper(
+                    secret,
+                    settings.webhook_secret_pepper,
+                ),
+                signing_secret_encrypted=encrypted,
+                signing_secret_key_version="v1",
+            )
+            db.add(subscription)
+            db.flush()
+
+            original_ciphertexts[subscription.id] = encrypted
+
+        db.commit()
+
+    return original_ciphertexts
+
+
+def test_admin_reencrypt_respects_explicit_batch_limit(
+    client,
+    monkeypatch,
+):
+    old_key = "old-webhook-encryption-key-123456"
+    new_key = "new-webhook-encryption-key-123456"
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v1": old_key,
+                "v2": new_key,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v1",
+    )
+
+    original_ciphertexts = _create_reencrypt_batch_subscriptions(
+        count=3,
+        old_key=old_key,
+    )
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v2",
+    )
+
+    response = client.post(
+        "/admin/webhooks/re-encrypt?limit=2",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reencrypted"] == 2
+    assert response.json()["remaining"] is True
+
+    with SessionLocal() as db:
+        subscriptions = (
+            db.query(WebhookSubscription)
+            .filter(
+                WebhookSubscription.id.in_(
+                    original_ciphertexts.keys()
+                )
+            )
+            .order_by(WebhookSubscription.id)
+            .all()
+        )
+
+        assert [
+            subscription.signing_secret_key_version
+            for subscription in subscriptions
+        ] == ["v2", "v2", "v1"]
+
+
+def test_admin_reencrypt_second_batch_finishes_remaining_rows(
+    client,
+    monkeypatch,
+):
+    old_key = "old-webhook-encryption-key-123456"
+    new_key = "new-webhook-encryption-key-123456"
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v1": old_key,
+                "v2": new_key,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v1",
+    )
+
+    _create_reencrypt_batch_subscriptions(
+        count=3,
+        old_key=old_key,
+    )
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v2",
+    )
+
+    first_response = client.post(
+        "/admin/webhooks/re-encrypt?limit=2",
+        headers=ADMIN_HEADERS,
+    )
+    second_response = client.post(
+        "/admin/webhooks/re-encrypt?limit=2",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.json()["reencrypted"] == 2
+    assert first_response.json()["remaining"] is True
+
+    assert second_response.status_code == 200
+    assert second_response.json()["reencrypted"] == 1
+    assert second_response.json()["remaining"] is False
+
+
+def test_admin_reencrypt_zero_limit_is_rejected(client):
+    response = client.post(
+        "/admin/webhooks/re-encrypt?limit=0",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_reencrypt_negative_limit_is_rejected(client):
+    response = client.post(
+        "/admin/webhooks/re-encrypt?limit=-1",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+
+def test_admin_reencrypt_excessive_limit_is_rejected(client):
+    response = client.post(
+        "/admin/webhooks/re-encrypt?limit=1001",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+def test_admin_reencrypt_repairs_historically_mislabeled_active_key_version(
+    client,
+    monkeypatch,
+):
+    old_key = "old-webhook-encryption-key-123456"
+    new_key = "new-webhook-encryption-key-123456"
+    secret = "historically-mislabeled-secret"
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_keyring_json",
+        json.dumps(
+            {
+                "v1": old_key,
+                "v2": new_key,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v1",
+    )
+
+    old_ciphertext = security_module.encrypt_secret(secret)
+
+    with SessionLocal() as db:
+        subscription = WebhookSubscription(
+            tenant_id="tenant-demo",
+            target_url="https://example.com/mislabeled",
+            event_type="decision.allowed",
+            signing_secret_hash=hash_with_pepper(
+                secret,
+                settings.webhook_secret_pepper,
+            ),
+            signing_secret_encrypted=old_ciphertext,
+            signing_secret_key_version="v2",
+        )
+        db.add(subscription)
+        db.commit()
+        db.refresh(subscription)
+        subscription_id = subscription.id
+
+    monkeypatch.setattr(
+        security_module.settings,
+        "secret_encryption_active_kid",
+        "v2",
+    )
+
+    response = client.post(
+        "/admin/webhooks/re-encrypt?limit=100",
+        headers=ADMIN_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        subscription = db.get(
+            WebhookSubscription,
+            subscription_id,
+        )
+
+        assert subscription is not None
+        assert subscription.signing_secret_key_version == "v2"
+        assert subscription.signing_secret_encrypted != old_ciphertext
+        assert subscription.signing_secret_key_version_verified is True

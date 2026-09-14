@@ -282,3 +282,11 @@ def test_webhook_delivery_attempt_delivery_index_is_unique():
     )
 
     assert index.unique is True
+
+def test_webhook_subscription_secret_key_version_verified_is_required():
+    column = (
+        WebhookSubscription.__table__
+        .c.signing_secret_key_version_verified
+    )
+
+    assert column.nullable is False

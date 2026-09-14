@@ -100,40 +100,48 @@ def encrypt_secret(value: str) -> str:
         .decode("utf-8")
     )
 
+def decrypt_secret_with_key_version(
+    value: str,
+    *,
+    key_version: str | None = None,
+) -> tuple[str, str]:
+    keyring = get_secret_encryption_keyring()
+
+    candidate_kids: list[str] = []
+
+    if key_version and key_version in keyring:
+        candidate_kids.append(key_version)
+
+    candidate_kids.extend(
+        kid
+        for kid in keyring
+        if kid not in candidate_kids
+    )
+
+    for kid in candidate_kids:
+        try:
+            secret = (
+                _fernet_for_key(keyring[kid])
+                .decrypt(value.encode("utf-8"))
+                .decode("utf-8")
+            )
+            return secret, kid
+        except InvalidToken:
+            continue
+
+    raise ValueError("secret_decryption_failed")
+
 
 def decrypt_secret(
     value: str,
     *,
     key_version: str | None = None,
 ) -> str:
-    keyring = get_secret_encryption_keyring()
-
-    candidate_keys: list[str] = []
-
-    if key_version and key_version in keyring:
-        candidate_keys.append(keyring[key_version])
-
-    candidate_keys.extend(
-        encryption_key
-        for kid, encryption_key in keyring.items()
-        if not (
-            key_version
-            and key_version in keyring
-            and kid == key_version
-        )
+    secret, _ = decrypt_secret_with_key_version(
+        value,
+        key_version=key_version,
     )
-
-    for encryption_key in candidate_keys:
-        try:
-            return (
-                _fernet_for_key(encryption_key)
-                .decrypt(value.encode("utf-8"))
-                .decode("utf-8")
-            )
-        except InvalidToken:
-            continue
-
-    raise ValueError("secret_decryption_failed")
+    return secret
 
 
 def issue_access_token(*, tenant_id: str, right_id: str, user_id: str, device_id: str, scope: str) -> str:

@@ -44,6 +44,7 @@ def test_migration_files_are_present_in_expected_order():
         "0006_policy_and_workflow_tables.py",
         "0007_outbox_claim_lease.py",
         "0008_webhook_delivery_attempt_unique.py",
+        "0009_webhook_secret_key_verification.py",
     ]
 
 
@@ -1388,7 +1389,7 @@ def test_alembic_full_round_trip_returns_to_head_revision(tmp_path, monkeypatch)
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert revision == "0008_webhook_delivery_attempt_unique"
+    assert revision == "0009_webhook_secret_key_verification"
 
 # #874
 def test_alembic_head_adds_outbox_claim_columns(tmp_path, monkeypatch):
@@ -1510,7 +1511,7 @@ def test_alembic_0007_round_trip_restores_outbox_claim_fields(
         index["name"] == "ix_outbox_events_claim_expires_at"
         for index in indexes
     )
-    assert revision == "0008_webhook_delivery_attempt_unique"
+    assert revision == "0009_webhook_secret_key_verification"
 
 # #878
 def test_alembic_head_adds_webhook_delivery_attempt_unique_index(
@@ -1772,11 +1773,11 @@ def test_alembic_0008_round_trip_restores_unique_index(
         == "uq_webhook_delivery_attempt_event_subscription_attempt"
         for index in indexes
     )
-    assert revision == "0008_webhook_delivery_attempt_unique"
+    assert revision == "0009_webhook_secret_key_verification"
 
 
 # #883
-def test_alembic_head_revision_is_0008(tmp_path, monkeypatch):
+def test_alembic_head_revision_is_0009(tmp_path, monkeypatch):
     from alembic import command
     from alembic.config import Config
     from sqlalchemy import create_engine, text
@@ -1795,7 +1796,7 @@ def test_alembic_head_revision_is_0008(tmp_path, monkeypatch):
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert revision == "0008_webhook_delivery_attempt_unique"
+    assert revision == "0009_webhook_secret_key_verification"
 
 
 # #884
@@ -1830,3 +1831,96 @@ def test_alembic_0008_index_uses_exact_expected_columns(
         "subscription_id",
         "attempt_number",
     ]
+
+def test_alembic_0009_adds_webhook_secret_key_verification_column(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    columns = inspect(create_engine(database_url)).get_columns(
+        "webhook_subscriptions"
+    )
+
+    column = next(
+        column
+        for column in columns
+        if column["name"] == "signing_secret_key_version_verified"
+    )
+
+    assert column["nullable"] is False
+
+
+def test_alembic_0009_marks_existing_webhooks_unverified(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+    command.upgrade(
+        config,
+        "0008_webhook_delivery_attempt_unique",
+    )
+
+    engine = create_engine(database_url)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO webhook_subscriptions
+                (
+                    tenant_id,
+                    target_url,
+                    event_type,
+                    signing_secret_hash,
+                    signing_secret_encrypted,
+                    signing_secret_key_version,
+                    enabled,
+                    created_at
+                )
+                VALUES
+                (
+                    'tenant-0009',
+                    'https://example.com/0009',
+                    'test.event',
+                    'hash',
+                    'encrypted',
+                    'v2',
+                    1,
+                    CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        verified = connection.execute(
+            text(
+                """
+                SELECT signing_secret_key_version_verified
+                FROM webhook_subscriptions
+                WHERE tenant_id = 'tenant-0009'
+                """
+            )
+        ).scalar_one()
+
+    assert verified in (False, 0)

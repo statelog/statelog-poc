@@ -63,6 +63,7 @@ from .services.auth_service import enforce_right_owner
 from .services.decision_service import build_cache_key
 from .services.privacy_service import pseudonymize_ip
 from .services.token_service import validate_token_issue_inputs
+from .services.webhook_service import reencrypt_webhook_secrets
 from .time_utils import utcnow_naive
 
 configure_logging()
@@ -557,6 +558,33 @@ def metrics_endpoint(
         METRICS_DATABASE_AVAILABLE_GAUGE.set(1)
 
     return metrics_response()
+
+@app.post("/admin/webhooks/re-encrypt")
+def reencrypt_webhook_subscription_secrets(
+    limit: int = Query(default=100, ge=1, le=1000),
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    try:
+        reencrypted, remaining = reencrypt_webhook_secrets(
+            db,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="webhook_secret_reencryption_failed",
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="persistence_unavailable",
+        ) from exc
+
+    return {
+        "reencrypted": reencrypted,
+        "remaining": remaining,
+    }
 
 
 @app.post("/admin/tenants")
@@ -1597,6 +1625,7 @@ def create_webhook(payload: WebhookCreate, db: Session = Depends(get_db), client
         signing_secret_hash=hash_with_pepper(payload.signing_secret, settings.webhook_secret_pepper),
         signing_secret_encrypted=encrypt_secret(payload.signing_secret),
         signing_secret_key_version=encryption_kid,
+        signing_secret_key_version_verified=True,
     )
     db.add(sub)
     commit_or_409(

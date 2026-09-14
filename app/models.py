@@ -2,9 +2,18 @@ from datetime import datetime
 
 from .time_utils import utcnow_naive
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from .database import Base
 
@@ -158,6 +167,11 @@ class WebhookSubscription(Base):
     signing_secret_hash: Mapped[str] = mapped_column(String(128))
     signing_secret_encrypted: Mapped[str] = mapped_column(Text)
     signing_secret_key_version: Mapped[str] = mapped_column(String(32), default='v1')
+    signing_secret_key_version_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
