@@ -2298,3 +2298,153 @@ def test_outbox_stale_owner_cannot_finalize_after_claim_is_replaced(
         )
 
         assert attempts == []
+
+def test_outbox_subscription_disabled_via_api_is_not_delivered(client, monkeypatch):
+    from tests.test_smoke import HEADERS, ensure_setup
+    from app.database import SessionLocal
+
+    ensure_setup(client)
+
+    create_response = client.post(
+        "/webhooks/subscriptions",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "target_url": "https://example.com/disabled-via-api",
+            "event_type": "outbox.disable.integration",
+            "signing_secret": "integration-secret-123",
+        },
+    )
+    assert create_response.status_code == 200
+    subscription_id = create_response.json()["subscription_id"]
+
+    disable_response = client.post(
+        f"/webhooks/subscriptions/{subscription_id}/disable",
+        headers=HEADERS,
+        json={"tenant_id": "tenant-demo"},
+    )
+    assert disable_response.status_code == 200
+    assert disable_response.json()["enabled"] is False
+
+    post_calls = []
+
+    def unexpected_post(*args, **kwargs):
+        post_calls.append((args, kwargs))
+        raise AssertionError("disabled webhook subscription was delivered")
+
+    monkeypatch.setattr("app.outbox_worker.requests.post", unexpected_post)
+
+    with SessionLocal() as db:
+        event = OutboxEvent(
+            tenant_id="tenant-demo",
+            event_type="outbox.disable.integration",
+            payload=json.dumps({"trace_id": "disabled-via-api"}),
+            delivered=False,
+            next_attempt_at=utcnow_naive(),
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+        event_id = event.id
+
+        count = deliver_pending_events(db)
+
+        db.expire_all()
+        persisted_event = db.get(OutboxEvent, event_id)
+
+        attempts = (
+            db.query(WebhookDeliveryAttempt)
+            .filter(WebhookDeliveryAttempt.event_id == event_id)
+            .count()
+        )
+
+        subscription = db.get(WebhookSubscription, subscription_id)
+
+        assert count == 1
+        assert persisted_event.delivered is True
+        assert persisted_event.delivered_at is not None
+        assert attempts == 0
+        assert subscription.enabled is False
+        assert post_calls == []
+
+def test_outbox_does_not_send_subscription_disabled_after_candidate_load(
+    monkeypatch,
+):
+    _patch_outbox_secret(monkeypatch)
+
+    with SessionLocal() as setup_db:
+        sub = _make_outbox_subscription(
+            setup_db,
+            tenant_id="outbox-disable-race",
+            target_url="https://example.com/disable-race",
+        )
+        event = _make_outbox_event(
+            setup_db,
+            tenant_id="outbox-disable-race",
+        )
+        subscription_id = sub.id
+        event_id = event.id
+
+    post_calls = []
+
+    def fake_post(*args, **kwargs):
+        post_calls.append((args, kwargs))
+        return _OutboxResponse(200)
+
+    monkeypatch.setattr(
+        "app.outbox_worker.requests.post",
+        fake_post,
+    )
+
+    from app import outbox_worker
+
+    original_already_delivered = outbox_worker._already_delivered
+    disabled = False
+
+    def disable_between_load_and_delivery(
+        db,
+        *,
+        event_id,
+        subscription_id,
+    ):
+        nonlocal disabled
+
+        if not disabled:
+            disabled = True
+
+            with SessionLocal() as other_db:
+                persisted_sub = other_db.get(
+                    WebhookSubscription,
+                    subscription_id,
+                )
+                persisted_sub.enabled = False
+                other_db.commit()
+
+        return original_already_delivered(
+            db,
+            event_id=event_id,
+            subscription_id=subscription_id,
+        )
+
+    monkeypatch.setattr(
+        outbox_worker,
+        "_already_delivered",
+        disable_between_load_and_delivery,
+    )
+
+    with SessionLocal() as db:
+        deliver_pending_events(db)
+
+    with SessionLocal() as verify_db:
+        persisted_sub = verify_db.get(
+            WebhookSubscription,
+            subscription_id,
+        )
+        persisted_event = verify_db.get(
+            OutboxEvent,
+            event_id,
+        )
+
+        assert persisted_sub.enabled is False
+        assert post_calls == []
+        assert persisted_event.delivered is True

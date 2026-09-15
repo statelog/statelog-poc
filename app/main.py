@@ -53,6 +53,7 @@ from .schemas import (
     TenantCreate,
     TokenIssueRequest,
     WebhookCreate,
+    WebhookDisable,
     PolicyCreate,
     PolicySimulationRequest,
     PolicyUpdate,
@@ -1707,6 +1708,45 @@ def create_webhook(payload: WebhookCreate, db: Session = Depends(get_db), client
     )
     return {"subscription_id": sub.id}
 
+@app.post("/webhooks/subscriptions/{subscription_id}/disable")
+def disable_webhook_subscription(
+    subscription_id: int,
+    payload: WebhookDisable,
+    db: Session = Depends(get_db),
+    client: ClientCredential = Depends(get_client),
+):
+    if client.tenant_id != payload.tenant_id:
+        raise HTTPException(status_code=403, detail="tenant_mismatch")
+
+    subscription = db.scalar(
+        select(WebhookSubscription).where(
+            WebhookSubscription.id == subscription_id,
+            WebhookSubscription.tenant_id == payload.tenant_id,
+        )
+    )
+
+    if subscription is None:
+        raise HTTPException(
+            status_code=404,
+            detail="webhook_subscription_not_found",
+        )
+
+    if not subscription.enabled:
+        return {
+            "subscription_id": subscription.id,
+            "enabled": False,
+        }
+
+    subscription.enabled = False
+    commit_or_409(
+        db,
+        detail="webhook_subscription_disable_failed",
+    )
+
+    return {
+        "subscription_id": subscription.id,
+        "enabled": subscription.enabled,
+    }
 
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 def admin_dashboard(request: Request, _: str = Depends(get_admin), db: Session = Depends(get_db)):

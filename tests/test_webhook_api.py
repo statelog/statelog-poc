@@ -1214,3 +1214,180 @@ def test_admin_reencrypt_repairs_historically_mislabeled_active_key_version(
         assert subscription.signing_secret_key_version == "v2"
         assert subscription.signing_secret_encrypted != old_ciphertext
         assert subscription.signing_secret_key_version_verified is True
+
+def test_webhook_subscription_can_be_disabled(client):
+    response = client.post(
+        "/webhooks/subscriptions",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "target_url": "https://example.com/webhook",
+            "event_type": "access.decision",
+            "signing_secret": "test-webhook-secret",
+        },
+    )
+
+    assert response.status_code == 200
+    subscription_id = response.json()["subscription_id"]
+
+    disable_response = client.post(
+        f"/webhooks/subscriptions/{subscription_id}/disable",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+        },
+    )
+
+    assert disable_response.status_code == 200
+    assert disable_response.json() == {
+        "subscription_id": subscription_id,
+        "enabled": False,
+    }
+
+    from app.database import SessionLocal
+    from app.models import WebhookSubscription
+
+    with SessionLocal() as db:
+        subscription = db.get(WebhookSubscription, subscription_id)
+        assert subscription is not None
+        assert subscription.enabled is False
+
+def test_webhook_subscription_disable_returns_404_for_unknown_subscription(client):
+    response = client.post(
+        "/webhooks/subscriptions/999999/disable",
+        headers=HEADERS,
+        json={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "webhook_subscription_not_found"
+
+
+def test_webhook_subscription_disable_is_tenant_isolated(client):
+    response = client.post(
+        "/webhooks/subscriptions",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "target_url": "https://example.com/webhook",
+            "event_type": "access.decision",
+            "signing_secret": "test-webhook-secret",
+        },
+    )
+    assert response.status_code == 200
+    subscription_id = response.json()["subscription_id"]
+
+    response = client.post(
+        f"/webhooks/subscriptions/{subscription_id}/disable",
+        headers=HEADERS,
+        json={"tenant_id": "tenant-other"},
+    )
+
+    assert response.status_code in (403, 404)
+
+
+def test_webhook_subscription_disable_requires_client_authentication(client):
+    response = client.post(
+        "/webhooks/subscriptions/1/disable",
+        json={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "missing_client_headers"
+
+
+def test_webhook_subscription_disable_is_idempotent(client):
+    response = client.post(
+        "/webhooks/subscriptions",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "target_url": "https://example.com/webhook",
+            "event_type": "access.decision",
+            "signing_secret": "test-webhook-secret",
+        },
+    )
+    assert response.status_code == 200
+    subscription_id = response.json()["subscription_id"]
+
+    first = client.post(
+        f"/webhooks/subscriptions/{subscription_id}/disable",
+        headers=HEADERS,
+        json={"tenant_id": "tenant-demo"},
+    )
+    second = client.post(
+        f"/webhooks/subscriptions/{subscription_id}/disable",
+        headers=HEADERS,
+        json={"tenant_id": "tenant-demo"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["enabled"] is False
+    assert second.json()["enabled"] is False
+
+
+def test_webhook_subscription_disable_persists_state(client):
+    response = client.post(
+        "/webhooks/subscriptions",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "target_url": "https://example.com/webhook",
+            "event_type": "access.decision",
+            "signing_secret": "test-webhook-secret",
+        },
+    )
+    assert response.status_code == 200
+    subscription_id = response.json()["subscription_id"]
+
+    response = client.post(
+        f"/webhooks/subscriptions/{subscription_id}/disable",
+        headers=HEADERS,
+        json={"tenant_id": "tenant-demo"},
+    )
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        subscription = db.get(WebhookSubscription, subscription_id)
+        assert subscription is not None
+        assert subscription.enabled is False
+
+
+def test_webhook_subscription_disable_commit_failure_rolls_back(client, monkeypatch):
+    from sqlalchemy.orm import Session
+
+    response = client.post(
+        "/webhooks/subscriptions",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "target_url": "https://example.com/webhook",
+            "event_type": "access.decision",
+            "signing_secret": "test-webhook-secret",
+        },
+    )
+    assert response.status_code == 200
+    subscription_id = response.json()["subscription_id"]
+
+    original_commit = Session.commit
+
+    def broken_commit(self):
+        raise SQLAlchemyError("forced_webhook_disable_failure")
+
+    monkeypatch.setattr(Session, "commit", broken_commit)
+
+    response = client.post(
+        f"/webhooks/subscriptions/{subscription_id}/disable",
+        headers=HEADERS,
+        json={"tenant_id": "tenant-demo"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "persistence_unavailable"
+
+    monkeypatch.setattr(Session, "commit", original_commit)
+
+    with SessionLocal() as db:
+        subscription = db.get(WebhookSubscription, subscription_id)
+        assert subscription.enabled is True

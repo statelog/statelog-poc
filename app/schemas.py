@@ -106,6 +106,9 @@ class WebhookCreate(BaseModel):
         pattern=r".*\S.*",
     )
 
+class WebhookDisable(BaseModel):
+    tenant_id: str
+
 
 class DecisionResponse(BaseModel):
     allow: bool

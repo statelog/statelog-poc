@@ -293,6 +293,16 @@ def deliver_pending_events(db: Session, batch_size: int | None = None) -> int:
             ):
                 continue
 
+            subscription_enabled = db.scalar(
+                select(WebhookSubscription.enabled).where(
+                    WebhookSubscription.id == sub.id,
+                    WebhookSubscription.tenant_id == event.tenant_id,
+                )
+            )
+
+            if subscription_enabled is not True:
+                continue
+
             timestamp = int(time.time())
             delivery_id = f"evt-{event.id}-sub-{sub.id}"
 
