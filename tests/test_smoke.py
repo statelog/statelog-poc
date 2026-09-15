@@ -2236,3 +2236,162 @@ def test_access_right_concurrent_updates_reject_stale_writer(client):
     finally:
         db_a.close()
         db_b.close()
+
+def test_admin_can_disable_client_credential(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/clients/disable",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "client_id": "gateway-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "tenant_id": "tenant-demo",
+        "client_id": "gateway-1",
+        "enabled": False,
+    }
+
+    token_response = client.post(
+        "/token/issue",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "right_id": "right-001",
+            "user_id": "user-123",
+            "device_id": "gate-A1",
+            "scope": "access",
+        },
+    )
+
+    assert token_response.status_code == 401
+    assert token_response.json()["detail"] == "invalid_client"
+
+def test_disable_client_returns_404_for_unknown_credential(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/clients/disable",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "client_id": "missing-client",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "client_not_found"
+
+
+def test_disable_client_is_tenant_isolated(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/clients/disable",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "client_id": "gateway-1",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "client_not_found"
+
+    token_response = client.post(
+        "/token/issue",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "right_id": "right-001",
+            "user_id": "user-123",
+            "device_id": "gate-A1",
+            "scope": "access",
+        },
+    )
+
+    assert token_response.status_code == 200
+
+
+def test_disable_client_requires_admin_authentication(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/clients/disable",
+        json={
+            "tenant_id": "tenant-demo",
+            "client_id": "gateway-1",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_admin"
+
+
+def test_disable_client_is_idempotent(client):
+    ensure_setup(client)
+
+    payload = {
+        "tenant_id": "tenant-demo",
+        "client_id": "gateway-1",
+    }
+
+    first = client.post(
+        "/admin/clients/disable",
+        headers=ADMIN_HEADERS,
+        json=payload,
+    )
+    second = client.post(
+        "/admin/clients/disable",
+        headers=ADMIN_HEADERS,
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["enabled"] is False
+
+
+def test_disable_client_commit_failure_rolls_back_credential(client, monkeypatch):
+    ensure_setup(client)
+
+    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.orm import Session
+    from app.database import SessionLocal
+    from app.models import ClientCredential
+
+    original_commit = Session.commit
+
+    def broken_commit(self):
+        raise SQLAlchemyError("forced_client_disable_failure")
+
+    monkeypatch.setattr(Session, "commit", broken_commit)
+
+    response = client.post(
+        "/admin/clients/disable",
+        headers=ADMIN_HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "client_id": "gateway-1",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "persistence_unavailable"
+
+    monkeypatch.setattr(Session, "commit", original_commit)
+
+    with SessionLocal() as db:
+        credential = (
+            db.query(ClientCredential)
+            .filter_by(
+                tenant_id="tenant-demo",
+                client_id="gateway-1",
+            )
+            .one()
+        )
+        assert credential.enabled is True

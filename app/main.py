@@ -49,6 +49,7 @@ from .schemas import (
     ClientCreate,
     DecisionResponse,
     DeviceCreate,
+    ClientDisable,
     TenantCreate,
     TokenIssueRequest,
     WebhookCreate,
@@ -603,6 +604,34 @@ def create_client(payload: ClientCreate, _: str = Depends(get_admin), db: Sessio
     db.add(client)
     commit_or_409(db, detail="client_exists")
     return {"tenant_id": payload.tenant_id, "client_id": payload.client_id}
+
+@app.post("/admin/clients/disable")
+def disable_client(
+    payload: ClientDisable,
+    _: str = Depends(get_admin),
+    db: Session = Depends(get_db),
+):
+    credential = db.scalar(
+        select(ClientCredential).where(
+            ClientCredential.tenant_id == payload.tenant_id,
+            ClientCredential.client_id == payload.client_id,
+        )
+    )
+
+    if credential is None:
+        raise HTTPException(
+            status_code=404,
+            detail="client_not_found",
+        )
+
+    credential.enabled = False
+    commit_or_409(db, detail="client_disable_failed")
+
+    return {
+        "tenant_id": credential.tenant_id,
+        "client_id": credential.client_id,
+        "enabled": credential.enabled,
+    }
 
 @app.post("/admin/policies/simulate")
 def simulate_policy(

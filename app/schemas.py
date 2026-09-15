@@ -24,6 +24,11 @@ class ClientCreate(BaseModel):
     api_key: str
 
 
+class ClientDisable(BaseModel):
+    tenant_id: str
+    client_id: str
+
+
 class DeviceCreate(BaseModel):
     tenant_id: str
     device_id: str
