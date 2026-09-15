@@ -46,6 +46,7 @@ def test_migration_files_are_present_in_expected_order():
         "0008_webhook_delivery_attempt_unique.py",
         "0009_webhook_secret_key_verification.py",
         "0010_webhook_reencrypt_claim_lease.py",
+        "0011_device_enabled.py",
     ]
 
 
@@ -1390,7 +1391,7 @@ def test_alembic_full_round_trip_returns_to_head_revision(tmp_path, monkeypatch)
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert revision == "0010_webhook_reencrypt_claim_lease"
+    assert revision == "0011_device_enabled"
 
 # #874
 def test_alembic_head_adds_outbox_claim_columns(tmp_path, monkeypatch):
@@ -1512,7 +1513,7 @@ def test_alembic_0007_round_trip_restores_outbox_claim_fields(
         index["name"] == "ix_outbox_events_claim_expires_at"
         for index in indexes
     )
-    assert revision == "0010_webhook_reencrypt_claim_lease"
+    assert revision == "0011_device_enabled"
 
 # #878
 def test_alembic_head_adds_webhook_delivery_attempt_unique_index(
@@ -1774,7 +1775,7 @@ def test_alembic_0008_round_trip_restores_unique_index(
         == "uq_webhook_delivery_attempt_event_subscription_attempt"
         for index in indexes
     )
-    assert revision == "0010_webhook_reencrypt_claim_lease"
+    assert revision == "0011_device_enabled"
 
 
 # #883
@@ -1797,7 +1798,7 @@ def test_alembic_head_revision_is_0009(tmp_path, monkeypatch):
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert revision == "0010_webhook_reencrypt_claim_lease"
+    assert revision == "0011_device_enabled"
 
 
 # #884
@@ -1925,3 +1926,86 @@ def test_alembic_0009_marks_existing_webhooks_unverified(
         ).scalar_one()
 
     assert verified in (False, 0)
+
+def test_alembic_0011_adds_device_enabled_state(
+    tmp_path,
+    monkeypatch,
+):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect, text
+
+    database_path = tmp_path / "statelog-migration.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setattr(settings, "database_url", database_url)
+
+    config = Config("alembic.ini")
+
+    command.upgrade(
+        config,
+        "0010_webhook_reencrypt_claim_lease",
+    )
+
+    engine = create_engine(database_url)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO devices
+                (
+                    tenant_id,
+                    device_id,
+                    description,
+                    created_at
+                )
+                VALUES
+                (
+                    'tenant-device-test',
+                    'device-before-0011',
+                    'existing device',
+                    CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+
+    command.upgrade(config, "0011_device_enabled")
+
+    columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("devices")
+    }
+
+    assert "enabled" in columns
+    assert columns["enabled"]["nullable"] is False
+
+    with engine.connect() as connection:
+        enabled = connection.execute(
+            text(
+                """
+                SELECT enabled
+                FROM devices
+                WHERE device_id = 'device-before-0011'
+                """
+            )
+        ).scalar_one()
+
+        revision = connection.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalar_one()
+
+    assert enabled in (True, 1)
+    assert revision == "0011_device_enabled"
+
+    command.downgrade(
+        config,
+        "0010_webhook_reencrypt_claim_lease",
+    )
+
+    columns_after_downgrade = {
+        column["name"]
+        for column in inspect(engine).get_columns("devices")
+    }
+
+    assert "enabled" not in columns_after_downgrade

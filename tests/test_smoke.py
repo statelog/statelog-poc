@@ -2395,3 +2395,152 @@ def test_disable_client_commit_failure_rolls_back_credential(client, monkeypatch
             .one()
         )
         assert credential.enabled is True
+
+def test_disabled_device_cannot_issue_token_or_request_access(client):
+    ensure_setup(client)
+
+    token_response_before_disable = issue_token(client)
+    assert token_response_before_disable.status_code == 200
+    token_before_disable = token_response_before_disable.json()["token"]
+
+    disable_response = client.post(
+        "/admin/devices/disable",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "device_id": "gate-A1",
+        },
+    )
+
+    assert disable_response.status_code == 200
+    assert disable_response.json() == {
+        "tenant_id": "tenant-demo",
+        "device_id": "gate-A1",
+        "enabled": False,
+    }
+
+    token_after_disable = client.post(
+        "/token/issue",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "right_id": "right-001",
+            "user_id": "user-123",
+            "device_id": "gate-A1",
+            "scope": "access",
+        },
+    )
+
+    assert token_after_disable.status_code == 404
+    assert token_after_disable.json()["detail"] == "device_not_found"
+
+    access_after_disable = access_request(
+        client,
+        token_before_disable,
+    )
+
+    assert access_after_disable.status_code == 404
+    assert access_after_disable.json()["detail"] == "device_not_found"
+
+def test_disable_device_returns_404_for_unknown_device(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/devices/disable",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "device_id": "missing-device",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "device_not_found"
+
+
+def test_disable_device_rejects_other_tenant(client):
+    ensure_setup(client)
+
+    response = client.post(
+        "/admin/devices/disable",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-other",
+            "device_id": "gate-A1",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "tenant_mismatch"
+
+    token_response = issue_token(client)
+    assert token_response.status_code == 200
+
+
+def test_disable_device_is_idempotent(client):
+    ensure_setup(client)
+
+    payload = {
+        "tenant_id": "tenant-demo",
+        "device_id": "gate-A1",
+    }
+
+    first = client.post(
+        "/admin/devices/disable",
+        headers=HEADERS,
+        json=payload,
+    )
+    second = client.post(
+        "/admin/devices/disable",
+        headers=HEADERS,
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == {
+        "tenant_id": "tenant-demo",
+        "device_id": "gate-A1",
+        "enabled": False,
+    }
+
+
+def test_disable_device_commit_failure_rolls_back_device(client, monkeypatch):
+    ensure_setup(client)
+
+    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.orm import Session
+    from app.database import SessionLocal
+    from app.models import Device
+
+    original_commit = Session.commit
+
+    def broken_commit(self):
+        raise SQLAlchemyError("forced_device_disable_failure")
+
+    monkeypatch.setattr(Session, "commit", broken_commit)
+
+    response = client.post(
+        "/admin/devices/disable",
+        headers=HEADERS,
+        json={
+            "tenant_id": "tenant-demo",
+            "device_id": "gate-A1",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "persistence_unavailable"
+
+    monkeypatch.setattr(Session, "commit", original_commit)
+
+    with SessionLocal() as db:
+        device = (
+            db.query(Device)
+            .filter_by(
+                tenant_id="tenant-demo",
+                device_id="gate-A1",
+            )
+            .one()
+        )
+        assert device.enabled is True

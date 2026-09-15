@@ -58,6 +58,7 @@ from .schemas import (
     PolicyUpdate,
     WorkflowConfigUpdate,
     normalize_utc_naive,
+    DeviceDisable,
 )
 from .security import build_request_fingerprint, constant_time_equals, decode_access_token, encrypt_secret, get_active_secret_encryption_key, get_active_signing_key, hash_secret, hash_with_pepper, issue_access_token
 from .services.auth_service import enforce_right_owner
@@ -1142,6 +1143,42 @@ def create_device(payload: DeviceCreate, db: Session = Depends(get_db), client: 
     return {"device_id": payload.device_id}
 
 
+@app.post("/admin/devices/disable")
+def disable_device(
+    payload: DeviceDisable,
+    db: Session = Depends(get_db),
+    client: ClientCredential = Depends(get_client),
+):
+    if client.tenant_id != payload.tenant_id:
+        raise HTTPException(status_code=403, detail="tenant_mismatch")
+
+    device = db.scalar(
+        select(Device).where(
+            Device.tenant_id == payload.tenant_id,
+            Device.device_id == payload.device_id,
+        )
+    )
+
+    if device is None:
+        raise HTTPException(status_code=404, detail="device_not_found")
+
+    if not device.enabled:
+        return {
+            "tenant_id": device.tenant_id,
+            "device_id": device.device_id,
+            "enabled": False,
+        }
+
+    device.enabled = False
+    commit_or_409(db, detail="device_disable_failed")
+
+    return {
+        "tenant_id": device.tenant_id,
+        "device_id": device.device_id,
+        "enabled": device.enabled,
+    }
+
+
 @app.post("/rights/create")
 def create_right(payload: AccessRightCreate, db: Session = Depends(get_db), client: ClientCredential = Depends(get_client)):
     if client.tenant_id != payload.tenant_id:
@@ -1206,7 +1243,13 @@ def revoke_right(
 def token_issue(payload: TokenIssueRequest, db: Session = Depends(get_db), client: ClientCredential = Depends(get_client)):
     if client.tenant_id != payload.tenant_id:
         raise HTTPException(status_code=403, detail="tenant_mismatch")
-    device = db.scalar(select(Device).where(Device.tenant_id == payload.tenant_id, Device.device_id == payload.device_id))
+    device = db.scalar(
+        select(Device).where(
+            Device.tenant_id == payload.tenant_id,
+            Device.device_id == payload.device_id,
+            Device.enabled.is_(True),
+        )
+    )
     if not device:
         raise HTTPException(status_code=404, detail="device_not_found")
     right = db.scalar(select(AccessRight).where(AccessRight.tenant_id == payload.tenant_id, AccessRight.right_id == payload.right_id))
@@ -1326,6 +1369,7 @@ def request_access(payload: AccessRequest, request: Request, db: Session = Depen
         select(Device).where(
             Device.tenant_id == client.tenant_id,
             Device.device_id == payload.device_id,
+            Device.enabled.is_(True),
         )
     )
 

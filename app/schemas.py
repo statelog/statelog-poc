@@ -35,6 +35,11 @@ class DeviceCreate(BaseModel):
     description: str = ""
 
 
+class DeviceDisable(BaseModel):
+    tenant_id: str
+    device_id: str
+
+
 class AccessRightCreate(BaseModel):
     tenant_id: str
     right_id: str
