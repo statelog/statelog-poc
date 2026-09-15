@@ -3,6 +3,8 @@ import pytest
 from fastapi import HTTPException
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import select
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.config import settings
 from app.database import SessionLocal
@@ -2175,3 +2177,62 @@ def test_atomic_quota_reservation_rolls_back_with_transaction(client):
     with SessionLocal() as verify_db:
         tenant = verify_db.get(Tenant, "tenant-demo")
         assert tenant.usage_count == 0
+
+# AccessRight optimistic concurrency regression
+def test_access_right_concurrent_updates_reject_stale_writer(client):
+    ensure_setup(client)
+
+    db_a = SessionLocal()
+    db_b = SessionLocal()
+
+    try:
+        right_a = db_a.scalar(
+            select(AccessRight).where(
+                AccessRight.tenant_id == "tenant-demo",
+                AccessRight.right_id == "right-001",
+            )
+        )
+        right_b = db_b.scalar(
+            select(AccessRight).where(
+                AccessRight.tenant_id == "tenant-demo",
+                AccessRight.right_id == "right-001",
+            )
+        )
+
+        assert right_a is not None
+        assert right_b is not None
+        assert right_a.version == 1
+        assert right_b.version == 1
+
+        # Writer A revokes the right.
+        right_a.valid = False
+        right_a.version += 1
+        db_a.commit()
+
+        # Writer B is based on the stale version and performs an
+        # ownership-transfer style mutation.
+        right_b.owner_id = "user-456"
+        right_b.owner_change_count += 1
+        right_b.version += 1
+
+        with pytest.raises(StaleDataError):
+            db_b.commit()
+
+        db_b.rollback()
+
+        with SessionLocal() as verify_db:
+            persisted = verify_db.scalar(
+                select(AccessRight).where(
+                    AccessRight.tenant_id == "tenant-demo",
+                    AccessRight.right_id == "right-001",
+                )
+            )
+
+            assert persisted is not None
+            assert persisted.valid is False
+            assert persisted.owner_id == "user-123"
+            assert persisted.owner_change_count == 0
+            assert persisted.version == 2
+    finally:
+        db_a.close()
+        db_b.close()
